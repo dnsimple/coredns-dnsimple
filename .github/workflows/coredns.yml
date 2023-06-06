@@ -1,0 +1,32 @@
+name: CoreDNS
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.19
+
+    - name: Init
+      run: go mod tidy
+
+    - name: Build CoreDNS
+      run: |
+        pluginDir="$PWD"
+        pushd "$(mktemp -d)"
+        git clone https://github.com/coredns/coredns .
+        sed -i "s%^go 1.20%go 1.19\nreplace github.com/dnsimple/coredns-dnsimple => $pluginDir%" go.mod
+        sed -i 's%route53:route53%dnsimple:github.com/dnsimple/coredns-dnsimple%' plugin.cfg
+        go generate
+        go mod tidy
+        go build
