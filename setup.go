@@ -35,7 +35,7 @@ func setup(c *caddy.Controller) error {
 		}
 
 		var (
-			apiKey    string
+			accessToken    string
 			accountId string
 			sandbox   bool
 		)
@@ -47,7 +47,7 @@ func setup(c *caddy.Controller) error {
 				if len(v) < 2 {
 					return plugin.Error("dnsimple", c.Errf("invalid access token: %v", v))
 				}
-				apiKey = v[1]
+				accessToken = v[1]
 				// TODO We should clarify why this is bad.
 				log.Warning("consider using alternative ways of providing credentials, such as environment variables")
 			case "account_id":
@@ -82,9 +82,9 @@ func setup(c *caddy.Controller) error {
 			}
 		}
 
-		if apiKey == "" {
+		if accessToken == "" {
 			// Keep this environment variable name consistent across all our integrations (e.g. SDKs, Terraform provider).
-			apiKey = os.Getenv("DNSIMPLE_TOKEN")
+			accessToken = os.Getenv("DNSIMPLE_TOKEN")
 		}
 
 		if accountId == "" {
@@ -97,7 +97,7 @@ func setup(c *caddy.Controller) error {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client := dnsimple.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: apiKey})))
+		client := dnsimple.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})))
 		client.SetUserAgent("coredns-plugin-dnsimple")
 		if sandbox {
 			client.BaseURL = "https://api.sandbox.dnsimple.com"
