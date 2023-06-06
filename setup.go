@@ -3,6 +3,7 @@ package dnsimple
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"time"
@@ -21,6 +22,8 @@ var log = clog.NewWithPlugin("dnsimple")
 func init() { plugin.Register("dnsimple", setup) }
 
 func setup(c *caddy.Controller) error {
+	rand.Seed(time.Now().UTC().UnixNano())
+
 	for c.Next() {
 		var fall fall.F
 
@@ -35,9 +38,9 @@ func setup(c *caddy.Controller) error {
 		}
 
 		var (
-			accessToken    string
-			accountId string
-			sandbox   bool
+			accessToken string
+			accountId   string
+			sandbox     bool
 		)
 
 		for c.NextBlock() {
