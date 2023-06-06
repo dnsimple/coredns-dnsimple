@@ -1,0 +1,124 @@
+package dnsimple
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/coredns/caddy"
+	"github.com/coredns/coredns/core/dnsserver"
+	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/pkg/fall"
+	clog "github.com/coredns/coredns/plugin/pkg/log"
+	"github.com/dnsimple/dnsimple-go/dnsimple"
+	"golang.org/x/oauth2"
+)
+
+var log = clog.NewWithPlugin("dnsimple")
+
+func init() { plugin.Register("dnsimple", setup) }
+
+func setup(c *caddy.Controller) error {
+	for c.Next() {
+		var fall fall.F
+
+		// Default update frequency of 1 minute.
+		refresh := time.Duration(1) * time.Minute
+
+		// Copy the server block origins; if ZONES are given we will overwrite these again.
+		origins := plugin.OriginsFromArgsOrServerBlock(c.RemainingArgs(), c.ServerBlockKeys)
+
+		if len(origins) == 0 {
+			return plugin.Error("dnsimple", c.Errf("no zone specified"))
+		}
+
+		var (
+			accessToken    string
+			accountId string
+			sandbox   bool
+		)
+
+		for c.NextBlock() {
+			switch c.Val() {
+			case "access_token":
+				v := c.RemainingArgs()
+				if len(v) < 2 {
+					return plugin.Error("dnsimple", c.Errf("invalid access token: %v", v))
+				}
+				accessToken = v[1]
+				// TODO We should clarify why this is bad.
+				log.Warning("consider using alternative ways of providing credentials, such as environment variables")
+			case "account_id":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				accountId = c.Val()
+			case "fallthrough":
+				fall.SetZonesFromArgs(c.RemainingArgs())
+			case "refresh":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				var err error
+				refreshStr := c.Val()
+				if _, err = strconv.Atoi(refreshStr); err == nil {
+					refreshStr = fmt.Sprintf("%ss", c.Val())
+				}
+				if refresh, err = time.ParseDuration(refreshStr); err != nil {
+					return plugin.Error("dnsimple", c.Errf("unable to parse duration: %v", err))
+				}
+				if refresh <= 0 {
+					return plugin.Error("dnsimple", c.Errf("refresh interval must be greater than 0: %q", refreshStr))
+				}
+			case "sandbox":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				sandbox, _ = strconv.ParseBool(c.Val())
+			default:
+				return plugin.Error("dnsimple", c.Errf("unknown property %q", c.Val()))
+			}
+		}
+
+		if accessToken == "" {
+			// Keep this environment variable name consistent across all our integrations (e.g. SDKs, Terraform provider).
+			accessToken = os.Getenv("DNSIMPLE_TOKEN")
+		}
+
+		if accountId == "" {
+			accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
+		}
+
+		// TODO This overrides `sandbox false` in the config if "true" but ignores `DNSIMPLE_SANDBOX=false` if `sandbox true`, so the priority behaviour is inconsistent.
+		if !sandbox && os.Getenv("DNSIMPLE_SANDBOX") == "true" {
+			sandbox = true
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		client := dnsimple.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})))
+		client.SetUserAgent("coredns-plugin-dnsimple")
+		if sandbox {
+			client.BaseURL = "https://api.sandbox.dnsimple.com"
+		}
+
+		h, err := New(ctx, accountId, client, origins, refresh)
+		if err != nil {
+			cancel()
+			return plugin.Error("dnsimple", c.Errf("failed to create dnsimple plugin: %v", err))
+		}
+		h.Fall = fall
+		if err := h.Run(ctx); err != nil {
+			cancel()
+			return plugin.Error("dnsimple", c.Errf("failed to initialize dnsimple plugin: %v", err))
+		}
+
+		dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
+			h.Next = next
+			return h
+		})
+		c.OnShutdown(func() error { cancel(); return nil })
+	}
+	return nil
+}
