@@ -93,31 +93,26 @@ func (h *DNSimple) Run(ctx context.Context) error {
 }
 
 func maybeInterceptPoolResponse(zone *Zone, answers *[]dns.RR) {
-	var qname string
-	var ttl uint32
-	var pool []string
-	for _, ans := range *answers {
-		switch cname := ans.(type) {
-		case *dns.CNAME:
-			if ent, ok := zone.pools[cname.Hdr.Name]; ok {
-				pool = ent
-			} else {
-				return
+	if len(*answers) != 1 {
+		return
+	}
+	switch cname := (*answers)[0].(type) {
+	case *dns.CNAME:
+		if pool, ok := zone.pools[cname.Hdr.Name]; ok {
+			qname := cname.Hdr.Name
+			ttl := cname.Hdr.Ttl
+			idx := rand.Intn(len(pool))
+			r := new(dns.CNAME)
+			r.Hdr = dns.RR_Header{
+				Name:   qname,
+				Rrtype: dns.TypeCNAME,
+				Class:  dns.ClassINET,
+				Ttl:    ttl,
 			}
-			qname = cname.Hdr.Name
-			ttl = cname.Hdr.Ttl
+			r.Target = pool[idx] + "."
+			*answers = []dns.RR{r}
 		}
 	}
-	idx := rand.Intn(len(pool))
-	r := new(dns.CNAME)
-	r.Hdr = dns.RR_Header{
-		Name:   qname,
-		Rrtype: dns.TypeCNAME,
-		Class:  dns.ClassINET,
-		Ttl:    ttl,
-	}
-	r.Target = pool[idx] + "."
-	*answers = []dns.RR{r}
 }
 
 // ServeDNS implements the plugin.Handler.ServeDNS.
@@ -178,10 +173,16 @@ func updateZoneFromRecords(records []dnsimple.ZoneRecord, zone *Zone) error {
 
 		if rec.Type == "POOL" {
 			rec.Type = "CNAME"
+			isFirst := false
 			if zone.pools[fqdn] == nil {
 				zone.pools[fqdn] = make([]string, 0)
+				isFirst = true
 			}
 			zone.pools[fqdn] = append(zone.pools[fqdn], rec.Content)
+			if !isFirst {
+				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
+				continue
+			}
 		}
 
 		// Assemble RFC 1035 conforming record to pass into DNS scanner.
