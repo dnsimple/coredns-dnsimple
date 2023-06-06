@@ -3,6 +3,7 @@ package dnsimple
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -17,11 +18,14 @@ import (
 	"github.com/miekg/dns"
 )
 
+const POOL_CNAME_VAL_PREFIX = "8a2c64f7d0e26012b3f73977481e82abd48e9"
+
 // DNSimple is a plugin that returns RR from DNSimple.
 type DNSimple struct {
 	Next plugin.Handler
 	Fall fall.F
 
+	// Each zone name contains a trailing dot.
 	zoneNames []string
 	client    *dnsimple.Client
 	accountId string
@@ -33,34 +37,36 @@ type DNSimple struct {
 }
 
 type Zone struct {
+	// This contains the trailing dot.
+	name string
 	zone *file.Zone
-	dns  string
+	pools map[string][]string
 }
 
 type Zones map[string]*Zone
 
-func New(ctx context.Context, accountID string, client *dnsimple.Client, keys []string, refresh time.Duration) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, client *dnsimple.Client, keys []string, refresh time.Duration) (*DNSimple, error) {
 	zones := make(map[string]*Zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
-	for _, zoneNameRaw := range keys {
+	for _, zoneName := range keys {
 		// Check if the zone exists.
-		zoneName := strings.TrimSuffix(zoneNameRaw, ".")
-		_, err := client.Zones.GetZone(ctx, accountID, zoneName)
+		// Our API does not expect the zone name to end with a dot.
+		_, err := client.Zones.GetZone(ctx, accountId, strings.TrimSuffix(zoneName, "."))
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := zones[zoneNameRaw]; !ok {
-			zoneNames = append(zoneNames, zoneNameRaw)
+		if _, ok := zones[zoneName]; !ok {
+			zoneNames = append(zoneNames, zoneName)
 		}
-		zones[zoneNameRaw] = &Zone{dns: zoneNameRaw, zone: file.NewZone(zoneNameRaw, "")}
+		zones[zoneName] = &Zone{name: zoneName, zone: file.NewZone(zoneName, "")}
 	}
 	return &DNSimple{
-		accountId: accountID,
+		accountId: accountId,
 		client:    client,
+		refresh:   refresh,
+		upstream:  upstream.New(),
 		zoneNames: zoneNames,
 		zones:     zones,
-		upstream:  upstream.New(),
-		refresh:   refresh,
 	}, nil
 }
 
@@ -88,6 +94,34 @@ func (h *DNSimple) Run(ctx context.Context) error {
 	return nil
 }
 
+func maybeInterceptPoolResponse(zone *Zone, answers *[]dns.RR) {
+	var qname string
+	var ttl uint32
+	var pool []string
+	for _, ans := range *answers {
+		switch cname := ans.(type) {
+		case *dns.CNAME:
+			if ent, ok := zone.pools[cname.Hdr.Name]; ok {
+				pool = ent
+			} else {
+				return
+			}
+			qname = cname.Hdr.Name
+			ttl = cname.Hdr.Ttl
+		}
+	}
+	idx := rand.Intn(len(pool))
+	r := new(dns.CNAME)
+	r.Hdr = dns.RR_Header{
+		Name:   qname,
+		Rrtype: dns.TypeCNAME,
+		Class:  dns.ClassINET,
+		Ttl:    ttl,
+	}
+	r.Target = pool[idx] + "."
+	*answers = []dns.RR{r}
+}
+
 // ServeDNS implements the plugin.Handler.ServeDNS.
 func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
@@ -109,6 +143,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 	h.lock.RLock()
 	msg.Answer, msg.Ns, msg.Extra, result = zone.zone.Lookup(ctx, state, query)
 	h.lock.RUnlock()
+	maybeInterceptPoolResponse(zone, &msg.Answer)
 
 	if len(msg.Answer) == 0 && result != file.NoData && h.Fall.Through(query) {
 		return plugin.NextOrFailure(h.Name(), h.Next, ctx, w, r)
@@ -129,13 +164,13 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 	return dns.RcodeSuccess, nil
 }
 
-func updateZoneFromRecords(records []dnsimple.ZoneRecord, zone *file.Zone, zoneName string) error {
+func updateZoneFromRecords(records []dnsimple.ZoneRecord, zone *Zone) error {
 	for _, rec := range records {
 		var fqdn string
 		if rec.Name == "" {
-			fqdn = zoneName
+			fqdn = zone.name
 		} else {
-			fqdn = fmt.Sprintf("%s.%s", rec.Name, zoneName)
+			fqdn = fmt.Sprintf("%s.%s", rec.Name, zone.name)
 		}
 
 		if rec.Type == "MX" {
@@ -145,6 +180,10 @@ func updateZoneFromRecords(records []dnsimple.ZoneRecord, zone *file.Zone, zoneN
 
 		if rec.Type == "POOL" {
 			rec.Type = "CNAME"
+			if zone.pools[fqdn] == nil {
+				zone.pools[fqdn] = make([]string, 0)
+			}
+			zone.pools[fqdn] = append(zone.pools[fqdn], rec.Content)
 		}
 
 		// Assemble RFC 1035 conforming record to pass into DNS scanner.
@@ -155,7 +194,7 @@ func updateZoneFromRecords(records []dnsimple.ZoneRecord, zone *file.Zone, zoneN
 		}
 
 		log.Debugf("inserting record %s", rfc1035)
-		zone.Insert(rr)
+		zone.zone.Insert(rr)
 	}
 	return nil
 }
@@ -163,28 +202,28 @@ func updateZoneFromRecords(records []dnsimple.ZoneRecord, zone *file.Zone, zoneN
 func (h *DNSimple) updateZones(ctx context.Context) error {
 	errors := make(chan error)
 	defer close(errors)
-	for zoneNameRaw, zone := range h.zones {
-		go func(zoneNameRaw string, zone *Zone) {
+	for _, zone := range h.zones {
+		go func(zone *Zone) {
 			var err error
 			defer func() {
 				errors <- err
 			}()
 
-			newZone := file.NewZone(zoneNameRaw, "")
-			newZone.Upstream = h.upstream
+			newZone := Zone{name: zone.name, zone: file.NewZone(zone.name, ""), pools: make(map[string][]string, 0)}
+			newZone.zone.Upstream = h.upstream
 
 			options := &dnsimple.ZoneRecordListOptions{}
 			options.PerPage = dnsimple.Int(100)
 			// Fetch all records for the zone.
 			for {
-				zoneName := strings.TrimSuffix(zoneNameRaw, ".")
-				response, listErr := h.client.Zones.ListRecords(ctx, h.accountId, zoneName, options)
+				// Our API does not expect the zone name to end with a dot.
+				response, listErr := h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zone.name, "."), options)
 				if listErr != nil {
-					err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
+					err = fmt.Errorf("failed to list records for zone %s: %v", zone.name, listErr)
 					return
 				}
 
-				err = updateZoneFromRecords(response.Data, newZone, zoneNameRaw)
+				err = updateZoneFromRecords(response.Data, &newZone)
 				if err != nil {
 					return
 				}
@@ -195,9 +234,9 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				options.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
 			}
 			h.lock.Lock()
-			zone.zone = newZone
+			*zone = newZone
 			h.lock.Unlock()
-		}(zoneNameRaw, zone)
+		}(zone)
 	}
 	// Collect any errors and wait for all updates.
 	var errMsgs []string
