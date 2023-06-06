@@ -18,8 +18,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-const POOL_CNAME_VAL_PREFIX = "8a2c64f7d0e26012b3f73977481e82abd48e9"
-
 // DNSimple is a plugin that returns RR from DNSimple.
 type DNSimple struct {
 	Next plugin.Handler
@@ -38,8 +36,8 @@ type DNSimple struct {
 
 type Zone struct {
 	// This contains the trailing dot.
-	name string
-	zone *file.Zone
+	name  string
+	zone  *file.Zone
 	pools map[string][]string
 }
 

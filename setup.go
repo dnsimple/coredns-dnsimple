@@ -38,9 +38,9 @@ func setup(c *caddy.Controller) error {
 		}
 
 		var (
-			accessToken    string
-			accountId string
-			sandbox   bool
+			accessToken string
+			accountId   string
+			sandbox     bool
 		)
 
 		for c.NextBlock() {
