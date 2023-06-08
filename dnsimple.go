@@ -24,11 +24,12 @@ type DNSimple struct {
 	Fall fall.F
 
 	// Each zone name contains a trailing dot.
-	zoneNames []string
-	client    *dnsimple.Client
-	accountId string
-	upstream  *upstream.Upstream
-	refresh   time.Duration
+	zoneNames  []string
+	client     *dnsimple.Client
+	accountId  string
+	identifier string
+	upstream   *upstream.Upstream
+	refresh    time.Duration
 
 	lock  sync.RWMutex
 	zones zones
@@ -44,7 +45,7 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client *dnsimple.Client, keys map[string][]string, refresh time.Duration) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
@@ -63,12 +64,13 @@ func New(ctx context.Context, accountId string, client *dnsimple.Client, keys ma
 		}
 	}
 	return &DNSimple{
-		accountId: accountId,
-		client:    client,
-		refresh:   refresh,
-		upstream:  upstream.New(),
-		zoneNames: zoneNames,
-		zones:     zones,
+		accountId:  accountId,
+		client:     client,
+		identifier: identifier,
+		refresh:    refresh,
+		upstream:   upstream.New(),
+		zoneNames:  zoneNames,
+		zones:      zones,
 	}, nil
 }
 
@@ -226,6 +228,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 }
 
 func (h *DNSimple) updateZones(ctx context.Context) error {
+	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
 	errc := make(chan error)
 	defer close(errc)
 	for zoneName, z := range h.zones {

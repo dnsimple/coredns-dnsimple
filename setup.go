@@ -60,6 +60,7 @@ func setup(c *caddy.Controller) error {
 		var (
 			accessToken string
 			accountId   string
+			identifier  string
 			sandbox     bool
 		)
 
@@ -80,6 +81,11 @@ func setup(c *caddy.Controller) error {
 				accountId = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
+			case "identifier":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				identifier = c.Val()
 			case "refresh":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
@@ -114,6 +120,10 @@ func setup(c *caddy.Controller) error {
 			accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
 		}
 
+		if identifier == "" {
+			identifier = "default"
+		}
+
 		// TODO This overrides `sandbox false` in the config if "true" but ignores `DNSIMPLE_SANDBOX=false` if `sandbox true`, so the priority behaviour is inconsistent.
 		if !sandbox && os.Getenv("DNSIMPLE_SANDBOX") == "true" {
 			sandbox = true
@@ -126,7 +136,7 @@ func setup(c *caddy.Controller) error {
 			client.BaseURL = "https://api.sandbox.dnsimple.com"
 		}
 
-		h, err := New(ctx, accountId, client, keys, refresh)
+		h, err := New(ctx, accountId, client, identifier, keys, refresh)
 		if err != nil {
 			cancel()
 			return plugin.Error("dnsimple", c.Errf("failed to create dnsimple plugin: %v", err))
