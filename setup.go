@@ -38,10 +38,13 @@ func setup(c *caddy.Controller) error {
 
 		for i := 0; i < len(args); i++ {
 			parts := strings.SplitN(args[i], ":", 2)
-			if len(parts) != 2 {
+			if len(parts) < 1 {
 				return plugin.Error("dnsimple", c.Errf("invalid zone %q", args[i]))
 			}
-			dns, hostedZoneRegion := parts[0], parts[1]
+			dns, hostedZoneRegion := parts[0], "global"
+			if len(parts) > 1 {
+				hostedZoneRegion = parts[1]
+			}
 			if dns == "" || hostedZoneRegion == "" {
 				return plugin.Error("dnsimple", c.Errf("invalid zone %q", args[i]))
 			}
