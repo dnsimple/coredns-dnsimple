@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coredns/caddy"
@@ -25,16 +26,38 @@ func setup(c *caddy.Controller) error {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	for c.Next() {
+		keyPairs := map[string]struct{}{}
+		keys := map[string][]string{}
+
 		var fall fall.F
 
 		// Default update frequency of 1 minute.
 		refresh := time.Duration(1) * time.Minute
 
-		// Copy the server block origins; if ZONES are given we will overwrite these again.
-		origins := plugin.OriginsFromArgsOrServerBlock(c.RemainingArgs(), c.ServerBlockKeys)
+		args := c.RemainingArgs()
 
-		if len(origins) == 0 {
-			return plugin.Error("dnsimple", c.Errf("no zone specified"))
+		for i := 0; i < len(args); i++ {
+			parts := strings.SplitN(args[i], ":", 2)
+			if len(parts) < 1 {
+				return plugin.Error("dnsimple", c.Errf("invalid zone %q", args[i]))
+			}
+			dns, hostedZoneRegion := parts[0], "global"
+			if len(parts) > 1 {
+				hostedZoneRegion = parts[1]
+			}
+			if dns == "" || hostedZoneRegion == "" {
+				return plugin.Error("dnsimple", c.Errf("invalid zone %q", args[i]))
+			}
+			if _, ok := keyPairs[args[i]]; ok {
+				return plugin.Error("dnsimple", c.Errf("conflict zone %q", args[i]))
+			}
+
+			keyPairs[args[i]] = struct{}{}
+			keys[dns] = append(keys[dns], hostedZoneRegion)
+		}
+
+		if len(keys) == 0 {
+			return plugin.Error("dnsimple", c.Errf("no zone(s) specified"))
 		}
 
 		var (
@@ -48,7 +71,7 @@ func setup(c *caddy.Controller) error {
 			case "access_token":
 				v := c.RemainingArgs()
 				if len(v) < 2 {
-					return plugin.Error("dnsimple", c.Errf("invalid access token: %v", v))
+					return plugin.Error("dnsimple", c.Errf("invalid access token: '%v'", v))
 				}
 				accessToken = v[1]
 				// TODO We should clarify why this is bad.
@@ -72,8 +95,8 @@ func setup(c *caddy.Controller) error {
 				if refresh, err = time.ParseDuration(refreshStr); err != nil {
 					return plugin.Error("dnsimple", c.Errf("unable to parse duration: %v", err))
 				}
-				if refresh <= 0 {
-					return plugin.Error("dnsimple", c.Errf("refresh interval must be greater than 0: %q", refreshStr))
+				if refresh <= 60 {
+					return plugin.Error("dnsimple", c.Errf("refresh interval must be greater than 60 seconds: %q", refreshStr))
 				}
 			case "sandbox":
 				if !c.NextArg() {
@@ -106,7 +129,7 @@ func setup(c *caddy.Controller) error {
 			client.BaseURL = "https://api.sandbox.dnsimple.com"
 		}
 
-		h, err := New(ctx, accountId, client, origins, refresh)
+		h, err := New(ctx, accountId, client, keys, refresh)
 		if err != nil {
 			cancel()
 			return plugin.Error("dnsimple", c.Errf("failed to create dnsimple plugin: %v", err))
