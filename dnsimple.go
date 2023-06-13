@@ -193,6 +193,10 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			continue
 		}
 
+		if rec.Type == "ALIAS" {
+			rec.Type = "CNAME"
+		}
+
 		if rec.Type == "MX" {
 			// MX records have a priority and a content field.
 			rec.Content = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
@@ -210,6 +214,11 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
 				continue
 			}
+		}
+
+		if rec.Type == "URL" {
+			rec.Type = "CNAME"
+			rec.Content = "produiction-redirector-8cf1d6269a7293bd.elb.us-east-2.amazonaws.com"
 		}
 
 		// Assemble RFC 1035 conforming record to pass into DNS scanner.
