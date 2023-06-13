@@ -253,7 +253,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					if listErr == nil {
 						break
 					}
-					if i == h.maxRetries {
+					if i == 1+h.maxRetries {
 						err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
 						return
 					}
