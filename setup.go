@@ -93,6 +93,9 @@ func setup(c *caddy.Controller) error {
 				if maxRetries, err = strconv.Atoi(maxRetriesStr); err != nil {
 					return plugin.Error("dnsimple", c.Errf("unable to parse max retries: %v", err))
 				}
+				if maxRetries < 0 {
+					return plugin.Error("dnsimple", c.Err("max retries cannot be less than zero"))
+				}
 			case "refresh":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())

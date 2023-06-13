@@ -246,7 +246,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			// Fetch all records for the zone.
 			for {
 				var response *dnsimple.ZoneRecordsResponse
-				for i := 1; i <= h.maxRetries; i++ {
+				for i := 1; i <= 1+h.maxRetries; i++ {
 					var listErr error
 					// Our API does not expect the zone name to end with a dot.
 					response, listErr = h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zoneName, "."), options)
@@ -257,7 +257,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 						err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
 						return
 					}
-					log.Warningf("attempt %d failed to list records for zone %s: %v", i, zoneName, listErr)
+					log.Warningf("attempt %d failed to list records for zone %s, will retry: %v", i, zoneName, listErr)
 					// Exponential backoff.
 					time.Sleep((1 << i) * time.Second)
 				}
