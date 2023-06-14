@@ -64,6 +64,7 @@ func setup(c *caddy.Controller) error {
 			accessToken string
 			accountId   string
 			identifier  string
+			maxRetries  int = 3
 			sandbox     bool
 		)
 
@@ -89,6 +90,18 @@ func setup(c *caddy.Controller) error {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
 				identifier = c.Val()
+			case "max_retries":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				maxRetriesStr := c.Val()
+				var err error
+				if maxRetries, err = strconv.Atoi(maxRetriesStr); err != nil {
+					return plugin.Error("dnsimple", c.Errf("unable to parse max retries: %v", err))
+				}
+				if maxRetries < 0 {
+					return plugin.Error("dnsimple", c.Err("max retries cannot be less than zero"))
+				}
 			case "refresh":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
@@ -139,7 +152,7 @@ func setup(c *caddy.Controller) error {
 			client.BaseURL = "https://api.sandbox.dnsimple.com"
 		}
 
-		h, err := New(ctx, accountId, client, identifier, keys, refresh)
+		h, err := New(ctx, accountId, client, identifier, keys, refresh, maxRetries)
 		if err != nil {
 			cancel()
 			return plugin.Error("dnsimple", c.Errf("failed to create dnsimple plugin: %v", err))
