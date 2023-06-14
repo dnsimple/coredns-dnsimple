@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -193,17 +194,34 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			continue
 		}
 
+		type rawRecord struct {
+			typ     string
+			content string
+		}
+		rawRecords := make([]rawRecord, 0)
+
 		if rec.Type == "ALIAS" {
-			rec.Type = "CNAME"
-		}
-
-		if rec.Type == "MX" {
+			ips, err := net.LookupIP(rec.Content)
+			if err != nil {
+				return fmt.Errorf("failed to resolve ALIAS record %s with error: %v", rec.Content, err)
+			}
+			for _, res := range ips {
+				typ := "AAAA"
+				if res.To4() != nil {
+					typ = "A"
+				}
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     typ,
+					content: res.String(),
+				})
+			}
+		} else if rec.Type == "MX" {
 			// MX records have a priority and a content field.
-			rec.Content = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
-		}
-
-		if rec.Type == "POOL" {
-			rec.Type = "CNAME"
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "MX",
+				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
+			})
+		} else if rec.Type == "POOL" {
 			isFirst := false
 			if pools[fqdn] == nil {
 				pools[fqdn] = make([]string, 0)
@@ -214,22 +232,34 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
 				continue
 			}
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "CNAME",
+				content: rec.Content,
+			})
+		} else if rec.Type == "URL" {
+			rawRecords = append(rawRecords,
+				rawRecord{typ: "A", content: "3.12.205.86"},
+				rawRecord{typ: "A", content: "3.13.31.214"},
+				rawRecord{typ: "A", content: "52.15.124.193"},
+			)
+		} else {
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     rec.Type,
+				content: rec.Content,
+			})
 		}
 
-		if rec.Type == "URL" {
-			rec.Type = "CNAME"
-			rec.Content = "produiction-redirector-8cf1d6269a7293bd.elb.us-east-2.amazonaws.com"
-		}
+		for _, raw := range rawRecords {
+			// Assemble RFC 1035 conforming record to pass into DNS scanner.
+			rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, raw.typ, raw.content)
+			rr, err := dns.NewRR(rfc1035)
+			if err != nil {
+				return fmt.Errorf("failed to parse resource record: %v", err)
+			}
 
-		// Assemble RFC 1035 conforming record to pass into DNS scanner.
-		rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, rec.Type, rec.Content)
-		rr, err := dns.NewRR(rfc1035)
-		if err != nil {
-			return fmt.Errorf("failed to parse resource record: %v", err)
+			log.Debugf("inserting record %s", rfc1035)
+			zone.Insert(rr)
 		}
-
-		log.Debugf("inserting record %s", rfc1035)
-		zone.Insert(rr)
 	}
 	return nil
 }
