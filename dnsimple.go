@@ -30,6 +30,7 @@ type DNSimple struct {
 	identifier string
 	upstream   *upstream.Upstream
 	refresh    time.Duration
+	maxRetries int
 
 	lock  sync.RWMutex
 	zones zones
@@ -45,7 +46,7 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
@@ -71,6 +72,7 @@ func New(ctx context.Context, accountId string, client *dnsimple.Client, identif
 		upstream:   upstream.New(),
 		zoneNames:  zoneNames,
 		zones:      zones,
+		maxRetries: maxRetries,
 	}, nil
 }
 
@@ -246,15 +248,23 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			// Fetch all records for the zone.
 			for {
-				// Our API does not expect the zone name to end with a dot.
-				response, listErr := h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zoneName, "."), options)
-				if listErr != nil {
-					err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
-					return
+				var response *dnsimple.ZoneRecordsResponse
+				for i := 1; i <= 1+h.maxRetries; i++ {
+					var listErr error
+					// Our API does not expect the zone name to end with a dot.
+					response, listErr = h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zoneName, "."), options)
+					if listErr == nil {
+						break
+					}
+					if i == 1+h.maxRetries {
+						err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
+						return
+					}
+					log.Warningf("attempt %d failed to list records for zone %s, will retry: %v", i, zoneName, listErr)
+					// Exponential backoff.
+					time.Sleep((1 << i) * time.Second)
 				}
-
 				zoneRecords = append(zoneRecords, response.Data...)
-
 				if response.Pagination.CurrentPage >= response.Pagination.TotalPages {
 					break
 				}
@@ -262,7 +272,6 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			}
 
 			for i, regionalZone := range z {
-
 				newZone := file.NewZone(zoneName, "")
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)

@@ -15,6 +15,7 @@ dnsimple ZONE [ZONE ...] {
     access_token DNSIMPLE_TOKEN
     account_id   DNSIMPLE_ACCOUNT_ID
     fallthrough  [ZONES...]
+    max_retries  MAX_RETRIES
     refresh      DURATION
     sandbox      BOOLEAN
 }
@@ -24,6 +25,7 @@ dnsimple ZONE [ZONE ...] {
 - `access_token`: The access token to use when calling DNSimple APIs. If it's not provided, the environment variable `DNSIMPLE_TOKEN` will be used.
 - `account_id`: The account ID containing the configured zones. If it's not provided, the environment variable `DNSIMPLE_ACCOUNT_ID` will be used.
 - `fallthrough`: If a query matches the zone(s) but no response message can be generated, the query will be passed to the next plugin in the chain. To restrict passing only for specific zones, list them here; all other zone queries will **not** "fall through".
+- `max_retries`: Maximum retry attempts to fetch zones using the DNSimple API. Must be greater than zero. Defaults to 3.
 - `refresh`: The interval to refresh zones at. It must be a valid duration, and defaults to `1m`.
 - `sandbox`: If this is set to true, the [DNSimple Sandbox API](https://support.dnsimple.com/articles/sandbox/) will be used instead.
 
