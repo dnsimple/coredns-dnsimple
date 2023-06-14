@@ -27,6 +27,7 @@ type DNSimple struct {
 	zoneNames  []string
 	client     *dnsimple.Client
 	accountId  string
+	identifier string
 	upstream   *upstream.Upstream
 	refresh    time.Duration
 	maxRetries int
@@ -45,7 +46,7 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client *dnsimple.Client, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
@@ -66,6 +67,7 @@ func New(ctx context.Context, accountId string, client *dnsimple.Client, keys ma
 	return &DNSimple{
 		accountId:  accountId,
 		client:     client,
+		identifier: identifier,
 		refresh:    refresh,
 		upstream:   upstream.New(),
 		zoneNames:  zoneNames,
@@ -228,6 +230,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 }
 
 func (h *DNSimple) updateZones(ctx context.Context) error {
+	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
 	errc := make(chan error)
 	defer close(errc)
 	for zoneName, z := range h.zones {
