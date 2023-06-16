@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +24,7 @@ type DNSimple struct {
 
 	// Each zone name contains a trailing dot.
 	zoneNames  []string
-	client     *dnsimple.Client
+	client     dnsimpleZone
 	accountId  string
 	identifier string
 	upstream   *upstream.Upstream
@@ -46,14 +45,14 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, client dnsimpleZone, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
 	for zoneName, hostedZoneRegions := range keys {
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		_, err := client.Zones.GetZone(ctx, accountId, strings.TrimSuffix(zoneName, "."))
+		err := client.zoneExists(ctx, accountId, zoneName)
 		if err != nil {
 			return nil, err
 		}
@@ -240,43 +239,19 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				errc <- err
 			}()
 
-			// zoneRecords stores the complete set of zone records
-			var zoneRecords []dnsimple.ZoneRecord
+			var response *dnsimple.ZoneRecordsResponse
 
 			options := &dnsimple.ZoneRecordListOptions{}
 			options.PerPage = dnsimple.Int(100)
 
-			// Fetch all records for the zone.
-			for {
-				var response *dnsimple.ZoneRecordsResponse
-				for i := 1; i <= 1+h.maxRetries; i++ {
-					var listErr error
-					// Our API does not expect the zone name to end with a dot.
-					response, listErr = h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zoneName, "."), options)
-					if listErr == nil {
-						break
-					}
-					if i == 1+h.maxRetries {
-						err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
-						return
-					}
-					log.Warningf("attempt %d failed to list records for zone %s, will retry: %v", i, zoneName, listErr)
-					// Exponential backoff.
-					time.Sleep((1 << i) * time.Second)
-				}
-				zoneRecords = append(zoneRecords, response.Data...)
-				if response.Pagination.CurrentPage >= response.Pagination.TotalPages {
-					break
-				}
-				options.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
-			}
+			response, err = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
 
 			for i, regionalZone := range z {
 				newZone := file.NewZone(zoneName, "")
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)
 
-				err = updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone)
+				err = updateZoneFromRecords(zoneName, response.Data, regionalZone.region, newPools, newZone)
 				if err != nil {
 					return
 				}

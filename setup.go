@@ -15,12 +15,27 @@ import (
 	"github.com/coredns/coredns/plugin/pkg/fall"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/dnsimple/dnsimple-go/dnsimple"
-	"golang.org/x/oauth2"
 )
 
 var log = clog.NewWithPlugin("dnsimple")
 
 func init() { plugin.Register("dnsimple", setup) }
+
+type Options struct {
+	accessToken string
+	sandbox     bool
+}
+
+// exposed for testing
+var f = func(ctx context.Context, opts Options) (dnsimpleZone, error) {
+	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, opts.accessToken))
+	client.SetUserAgent("coredns-plugin-dnsimple")
+	if opts.sandbox {
+		client.BaseURL = "https://api.sandbox.dnsimple.com"
+	}
+
+	return dnsimpleClient{client}, nil
+}
 
 func setup(c *caddy.Controller) error {
 	rand.Seed(time.Now().UTC().UnixNano())
@@ -29,6 +44,7 @@ func setup(c *caddy.Controller) error {
 		keyPairs := map[string]struct{}{}
 		keys := map[string][]string{}
 
+		opts := Options{}
 		var fall fall.F
 
 		// Default update frequency of 1 minute.
@@ -56,16 +72,15 @@ func setup(c *caddy.Controller) error {
 			keys[dns] = append(keys[dns], hostedZoneRegion)
 		}
 
+		// TODO: set to warn when no zones are defined
 		if len(keys) == 0 {
 			return plugin.Error("dnsimple", c.Errf("no zone(s) specified"))
 		}
 
 		var (
-			accessToken string
-			accountId   string
-			identifier  string
-			maxRetries  int = 3
-			sandbox     bool
+			accountId  string
+			identifier string
+			maxRetries int = 3
 		)
 
 		for c.NextBlock() {
@@ -75,7 +90,7 @@ func setup(c *caddy.Controller) error {
 				if len(v) < 2 {
 					return plugin.Error("dnsimple", c.Errf("invalid access token: '%v'", v))
 				}
-				accessToken = v[1]
+				opts.accessToken = v[1]
 				// TODO We should clarify why this is bad.
 				log.Warning("consider using alternative ways of providing credentials, such as environment variables")
 			case "account_id":
@@ -121,15 +136,15 @@ func setup(c *caddy.Controller) error {
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				sandbox, _ = strconv.ParseBool(c.Val())
+				opts.sandbox, _ = strconv.ParseBool(c.Val())
 			default:
 				return plugin.Error("dnsimple", c.Errf("unknown property %q", c.Val()))
 			}
 		}
 
-		if accessToken == "" {
+		if opts.accessToken == "" {
 			// Keep this environment variable name consistent across all our integrations (e.g. SDKs, Terraform provider).
-			accessToken = os.Getenv("DNSIMPLE_TOKEN")
+			opts.accessToken = os.Getenv("DNSIMPLE_TOKEN")
 		}
 
 		if accountId == "" {
@@ -141,17 +156,16 @@ func setup(c *caddy.Controller) error {
 		}
 
 		// TODO This overrides `sandbox false` in the config if "true" but ignores `DNSIMPLE_SANDBOX=false` if `sandbox true`, so the priority behaviour is inconsistent.
-		if !sandbox && os.Getenv("DNSIMPLE_SANDBOX") == "true" {
-			sandbox = true
+		if !opts.sandbox && os.Getenv("DNSIMPLE_SANDBOX") == "true" {
+			opts.sandbox = true
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client := dnsimple.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})))
-		client.SetUserAgent("coredns-plugin-dnsimple")
-		if sandbox {
-			client.BaseURL = "https://api.sandbox.dnsimple.com"
+		client, err := f(ctx, opts)
+		if err != nil {
+			cancel()
+			return err
 		}
-
 		h, err := New(ctx, accountId, client, identifier, keys, refresh, maxRetries)
 		if err != nil {
 			cancel()
