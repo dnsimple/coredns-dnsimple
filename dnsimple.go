@@ -1,9 +1,13 @@
 package dnsimple
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -24,19 +28,21 @@ type DNSimple struct {
 	Fall fall.F
 
 	// Each zone name contains a trailing dot.
-	zoneNames  []string
-	client     *dnsimple.Client
-	accountId  string
-	identifier string
-	upstream   *upstream.Upstream
-	refresh    time.Duration
-	maxRetries int
+	zoneNames   []string
+	client      *dnsimple.Client
+	accountId   string
+	accessToken string
+	identifier  string
+	upstream    *upstream.Upstream
+	refresh     time.Duration
+	maxRetries  int
 
 	lock  sync.RWMutex
 	zones zones
 }
 
 type zone struct {
+	id int64
 	// This contains the trailing dot.
 	name   string
 	pools  map[string][]string
@@ -46,14 +52,14 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, accessToken string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
 	for zoneName, hostedZoneRegions := range keys {
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		_, err := client.Zones.GetZone(ctx, accountId, strings.TrimSuffix(zoneName, "."))
+		res, err := client.Zones.GetZone(ctx, accountId, strings.TrimSuffix(zoneName, "."))
 		if err != nil {
 			return nil, err
 		}
@@ -61,18 +67,19 @@ func New(ctx context.Context, accountId string, client *dnsimple.Client, identif
 			zoneNames = append(zoneNames, zoneName)
 		}
 		for _, hostedZoneRegion := range hostedZoneRegions {
-			zones[zoneName] = append(zones[zoneName], &zone{name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
+			zones[zoneName] = append(zones[zoneName], &zone{id: res.Data.ID, name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
 		}
 	}
 	return &DNSimple{
-		accountId:  accountId,
-		client:     client,
-		identifier: identifier,
-		refresh:    refresh,
-		upstream:   upstream.New(),
-		zoneNames:  zoneNames,
-		zones:      zones,
-		maxRetries: maxRetries,
+		accountId:   accountId,
+		accessToken: accessToken,
+		client:      client,
+		identifier:  identifier,
+		refresh:     refresh,
+		upstream:    upstream.New(),
+		zoneNames:   zoneNames,
+		zones:       zones,
+		maxRetries:  maxRetries,
 	}, nil
 }
 
@@ -183,8 +190,28 @@ func recordInZoneRegion(recordRegions []string, zoneRegion string) bool {
 	return false
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) error {
+type updateZoneRecordFailure struct {
+	Record dnsimple.ZoneRecord `json:"record"`
+	Error  string              `json:"error"`
+}
+
+type updateZoneStatusMessage struct {
+	Time              string                    `json:"time"`
+	CorednsIdentifier string                    `json:"coredns_identifier"`
+	Error             string                    `json:"error,omitempty"`
+	FailedRecords     []updateZoneRecordFailure `json:"failed_records,omitempty"`
+}
+
+type updateZoneStatusRequest struct {
+	Resource string `json:"resource"`
+	State    string `json:"state"`
+	Title    string `json:"title"`
+	Message  string `json:"message"`
+}
+
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) []updateZoneRecordFailure {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
+	failures := make([]updateZoneRecordFailure, 0)
 	for _, rec := range records {
 		var fqdn string
 		if rec.Name == "" {
@@ -220,25 +247,33 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, rec.Type, rec.Content)
 		rr, err := dns.NewRR(rfc1035)
 		if err != nil {
-			return fmt.Errorf("failed to parse resource record: %v", err)
+			failures = append(failures, updateZoneRecordFailure{
+				Record: rec,
+				Error:  fmt.Sprintf("failed to parse resource record: %v", err),
+			})
+			continue
 		}
 
 		log.Debugf("inserting record %s", rfc1035)
-		zone.Insert(rr)
+		err = zone.Insert(rr)
+		if err != nil {
+			failures = append(failures, updateZoneRecordFailure{
+				Record: rec,
+				Error:  fmt.Sprintf("failed to insert resource record: %v", err),
+			})
+			continue
+		}
 	}
-	return nil
+	return failures
 }
 
 func (h *DNSimple) updateZones(ctx context.Context) error {
 	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
-	errc := make(chan error)
-	defer close(errc)
+	var wg sync.WaitGroup
 	for zoneName, z := range h.zones {
+		wg.Add(1)
 		go func(zoneName string, z []*zone) {
-			var err error
-			defer func() {
-				errc <- err
-			}()
+			zoneError := ""
 
 			// zoneRecords stores the complete set of zone records
 			var zoneRecords []dnsimple.ZoneRecord
@@ -247,6 +282,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			options.PerPage = dnsimple.Int(100)
 
 			// Fetch all records for the zone.
+		outer:
 			for {
 				var response *dnsimple.ZoneRecordsResponse
 				for i := 1; i <= 1+h.maxRetries; i++ {
@@ -257,8 +293,8 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 						break
 					}
 					if i == 1+h.maxRetries {
-						err = fmt.Errorf("failed to list records for zone %s: %v", zoneName, listErr)
-						return
+						zoneError = fmt.Sprintf("failed to list records: %v", listErr)
+						break outer
 					}
 					log.Warningf("attempt %d failed to list records for zone %s, will retry: %v", i, zoneName, listErr)
 					// Exponential backoff.
@@ -271,34 +307,95 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				options.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
 			}
 
-			for i, regionalZone := range z {
-				newZone := file.NewZone(zoneName, "")
-				newZone.Upstream = h.upstream
-				newPools := make(map[string][]string, 16)
+			errorByRecordId := make(map[int64]updateZoneRecordFailure)
+			if zoneError == "" {
+				for i, regionalZone := range z {
+					newZone := file.NewZone(zoneName, "")
+					newZone.Upstream = h.upstream
+					newPools := make(map[string][]string, 16)
 
-				err = updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone)
-				if err != nil {
-					return
+					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
+					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone)
+					for _, f := range failedRecords {
+						errorByRecordId[f.Record.ID] = f
+					}
+
+					h.lock.Lock()
+					(*z[i]).pools = newPools
+					(*z[i]).zone = newZone
+					h.lock.Unlock()
 				}
-
-				h.lock.Lock()
-				(*z[i]).pools = newPools
-				(*z[i]).zone = newZone
-				h.lock.Unlock()
 			}
+			failedRecords := make([]updateZoneRecordFailure, len(errorByRecordId))
+			for _, f := range errorByRecordId {
+				failedRecords = append(failedRecords, f)
+			}
+
+			statusMessage := updateZoneStatusMessage{
+				Time:              time.Now().UTC().Format(time.RFC3339),
+				CorednsIdentifier: h.identifier,
+				Error:             zoneError,
+				FailedRecords:     failedRecords,
+			}
+			statusMessageJson, err := json.Marshal(statusMessage)
+			if err != nil {
+				panic(fmt.Errorf("failed to serialise status message: %v", err))
+			}
+			state := "ok"
+			if zoneError != "" || len(failedRecords) > 0 {
+				state = "error"
+			}
+			status := updateZoneStatusRequest{
+				Resource: fmt.Sprintf("zone:%d", z[0].id),
+				State:    state,
+				Title:    fmt.Sprintf("CoreDNS %s %s", h.identifier, state),
+				Message:  string(statusMessageJson),
+			}
+			statusJson, err := json.Marshal(status)
+			if err != nil {
+				panic(fmt.Errorf("failed to serialise status request: %v", err))
+			}
+			trySendStatus := func() error {
+				url := fmt.Sprintf("%s/v2/%s/platform/statuses", h.client.BaseURL, h.accountId)
+				req, err := http.NewRequest("POST", url, bytes.NewBuffer(statusJson))
+				if err != nil {
+					return err
+				}
+				req.Header.Set("authorization", fmt.Sprintf("Bearer %s", h.accessToken))
+				req.Header.Set("content-type", "application/json")
+				req.Header.Set("user-agent", h.client.UserAgent)
+				res, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return err
+				}
+				defer res.Body.Close()
+				if res.StatusCode < 200 || res.StatusCode > 299 {
+					body, err := io.ReadAll(res.Body)
+					if err == nil {
+						return fmt.Errorf("bad status code of %d: %s", res.StatusCode, string(body))
+					}
+					return fmt.Errorf("bad status code of %d (response could not be read)", res.StatusCode)
+				}
+				return nil
+			}
+			for i := 1; i <= 1+h.maxRetries; i++ {
+				err := trySendStatus()
+				if err == nil {
+					break
+				}
+				if i == 1+h.maxRetries {
+					log.Errorf("failed to send status: %v", err)
+					break
+				}
+				log.Warningf("attempt %d failed to send status, will retry: %v", i, err)
+				// Exponential backoff.
+				time.Sleep((1 << i) * time.Second)
+			}
+
+			wg.Done()
 		}(zoneName, z)
 	}
-	// Collect any errors and wait for all updates.
-	var errs []string
-	for i := 0; i < len(h.zones); i++ {
-		err := <-errc
-		if err != nil {
-			errs = append(errs, err.Error())
-		}
-	}
-	if len(errs) != 0 {
-		return fmt.Errorf("errors updating zones: %v", errs)
-	}
+	wg.Wait()
 	return nil
 }
 
