@@ -69,13 +69,6 @@ func (c fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID strin
 				Regions: []string{"global"},
 			},
 			{
-				Name:    "redirect",
-				Type:    "URL",
-				Content: "https://redirect.example.com",
-				TTL:     300,
-				Regions: []string{"global"},
-			},
-			{
 				Name:    "",
 				Type:    "SOA",
 				Content: "ns1.dnsimple.com admin.dnsimple.com 1589573370 86400 7200 604800 300",
