@@ -9,17 +9,19 @@ import (
 	"github.com/dnsimple/dnsimple-go/dnsimple"
 )
 
-type dnsimpleZone interface {
+// dnsimpleAPIService is an interface for `dnsimpleClient`.
+type dnsimpleAPIService interface {
 	listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) (*dnsimple.ZoneRecordsResponse, error)
 	zoneExists(ctx context.Context, accountID string, zoneName string) error
 }
 
+// dnsimpleClient is a wrapper for `dnsimple.Client`.
 type dnsimpleClient struct {
 	*dnsimple.Client
 }
 
-// listZoneRecords is a wrapper method around `dnsimple.Client.Zones.ListRecords`
-// it fetches and returns the complete record sets for a zone.
+// listZoneRecords is a wrapper method around `dnsimple.Client.Zones.ListRecords`.
+// It fetches and returns the complete record sets for a zone handling pagination.
 func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) (*dnsimple.ZoneRecordsResponse, error) {
 	var err error
 	var rs []dnsimple.ZoneRecord

@@ -24,7 +24,7 @@ type DNSimple struct {
 
 	// Each zone name contains a trailing dot.
 	zoneNames  []string
-	client     dnsimpleZone
+	client     dnsimpleAPIService
 	accountId  string
 	identifier string
 	upstream   *upstream.Upstream
@@ -45,7 +45,7 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client dnsimpleZone, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, client dnsimpleAPIService, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
@@ -245,15 +245,19 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			options.PerPage = dnsimple.Int(100)
 
 			response, err = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
+			if err != nil {
+				err = fmt.Errorf("failed to list resource records for %v from dnsimple: %v", zoneName, err)
+				return
+			}
 
 			for i, regionalZone := range z {
 				newZone := file.NewZone(zoneName, "")
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)
 
-				err = updateZoneFromRecords(zoneName, response.Data, regionalZone.region, newPools, newZone)
-				if err != nil {
-					return
+				if err := updateZoneFromRecords(zoneName, response.Data, regionalZone.region, newPools, newZone); err != nil {
+					// Maybe unsupported record type. Log and carry on.
+					log.Warningf("failed to process resource records: %v", err)
 				}
 
 				h.lock.Lock()

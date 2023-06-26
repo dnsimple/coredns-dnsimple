@@ -27,7 +27,7 @@ type Options struct {
 }
 
 // exposed for testing
-var f = func(ctx context.Context, opts Options) (dnsimpleZone, error) {
+var f = func(ctx context.Context, opts Options) (dnsimpleAPIService, error) {
 	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, opts.accessToken))
 	client.SetUserAgent("coredns-plugin-dnsimple")
 	if opts.sandbox {

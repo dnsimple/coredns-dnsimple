@@ -8,7 +8,7 @@ import (
 )
 
 func TestSetupDNSimple(t *testing.T) {
-	f = func(ctx context.Context, opt Options) (dnsimpleZone, error) {
+	f = func(ctx context.Context, opt Options) (dnsimpleAPIService, error) {
 		return fakeDNSimpleClient{}, nil
 	}
 
@@ -19,9 +19,9 @@ func TestSetupDNSimple(t *testing.T) {
 		{`dnsimple`, true}, // TODO: skip and warn when no zones are defined
 		{`dnsimple :`, true},
 		{`dnsimple ::`, true},
-		{`dnsimple example.com`, false},
-		{`dnsimple example.com:AMS { }`, false},
-		{`dnsimple example.com { 
+		{`dnsimple example.org`, false},
+		{`dnsimple example.org:AMS { }`, false},
+		{`dnsimple example.org { 
 			wat
 		}`, true},
 	}
