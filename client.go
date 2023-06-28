@@ -11,8 +11,8 @@ import (
 
 // dnsimpleAPIService is an interface for `dnsimpleClient`.
 type dnsimpleAPIService interface {
-	listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) (*dnsimple.ZoneRecordsResponse, error)
-	zoneExists(ctx context.Context, accountID string, zoneName string) error
+	getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error)
+	listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error)
 }
 
 // dnsimpleClient is a wrapper for `dnsimple.Client`.
@@ -20,9 +20,19 @@ type dnsimpleClient struct {
 	*dnsimple.Client
 }
 
-// listZoneRecords is a wrapper method around `dnsimple.Client.Zones.ListRecords`.
-// It fetches and returns the complete record sets for a zone handling pagination.
-func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) (*dnsimple.ZoneRecordsResponse, error) {
+// getZone is a wrapper method around `dnsimple.Client.Zones.GetZone`
+// it checks if a zone exists in DNSimple.
+func (c dnsimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
+	response, err := c.Zones.GetZone(ctx, accountID, strings.TrimSuffix(zoneName, "."))
+	if err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// listZoneRecords is a wrapper for `dnsimple.Client.Zones.ListRecords`.
+// It fetches and returns all record sets for a zone handling pagination.
+func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
 	var err error
 	var rs []dnsimple.ZoneRecord
 
@@ -51,15 +61,5 @@ func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, z
 		options.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
 	}
 
-	return &dnsimple.ZoneRecordsResponse{Data: rs}, nil
-}
-
-// zoneExists is a wrapper method around `dnsimple.Client.Zones.GetZone`
-// it checks if a zone exists in DNSimple.
-func (c dnsimpleClient) zoneExists(ctx context.Context, accountID string, zoneName string) error {
-	_, err := c.Zones.GetZone(ctx, accountID, strings.TrimSuffix(zoneName, "."))
-	if err != nil {
-		return err
-	}
-	return nil
+	return rs, nil
 }

@@ -19,70 +19,70 @@ type fakeDNSimpleClient struct {
 	*dnsimple.Client
 }
 
-func (c fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) (*dnsimple.ZoneRecordsResponse, error) {
+func (c fakeDNSimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
+	return &dnsimple.Zone{
+		Name: "example.org",
+	}, nil
+}
+
+func (c fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
 	if zoneName == "example.bad." {
 		return nil, errors.New("example.bad. zone is bad")
 	}
 
-	fakeZoneRecordsResponse := &dnsimple.ZoneRecordsResponse{
-		Data: []dnsimple.ZoneRecord{
-			{
-				Name:    "",
-				Type:    "A",
-				Content: "1.2.3.4",
-				TTL:     300,
-				Regions: []string{"global", "AMS"},
-			},
-			{
-				Name:    "",
-				Type:    "AAAA",
-				Content: "2001:db8:85a3::8a2e:370:7334",
-				TTL:     300,
-				Regions: []string{"global", "AMS"},
-			},
-			{
-				Name:    "www",
-				Type:    "CNAME",
-				Content: "example.org.",
-				TTL:     300,
-				Regions: []string{"global", "AMS"},
-			},
-			{
-				Name:    "another-region",
-				Type:    "A",
-				Content: "4.3.2.1",
-				TTL:     300,
-				Regions: []string{"CDG"},
-			},
-			{
-				Name:    "pool",
-				Type:    "POOL",
-				Content: "a.pool.example.com",
-				TTL:     300,
-				Regions: []string{"global"},
-			},
-			{
-				Name:    "pool",
-				Type:    "POOL",
-				Content: "b.pool.example.com",
-				TTL:     300,
-				Regions: []string{"global"},
-			},
-			{
-				Name:    "",
-				Type:    "SOA",
-				Content: "ns1.dnsimple.com admin.dnsimple.com 1589573370 86400 7200 604800 300",
-				TTL:     3600,
-				Regions: []string{"global"},
-			},
+	fakeZoneRecords := []dnsimple.ZoneRecord{
+		{
+			Name:    "",
+			Type:    "A",
+			Content: "1.2.3.4",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "",
+			Type:    "AAAA",
+			Content: "2001:db8:85a3::8a2e:370:7334",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "www",
+			Type:    "CNAME",
+			Content: "example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "another-region",
+			Type:    "A",
+			Content: "4.3.2.1",
+			TTL:     300,
+			Regions: []string{"CDG"},
+		},
+		{
+			Name:    "pool",
+			Type:    "POOL",
+			Content: "a.pool.example.com",
+			TTL:     300,
+			Regions: []string{"global"},
+		},
+		{
+			Name:    "pool",
+			Type:    "POOL",
+			Content: "b.pool.example.com",
+			TTL:     300,
+			Regions: []string{"global"},
+		},
+		{
+			Name:    "",
+			Type:    "SOA",
+			Content: "ns1.dnsimple.com admin.dnsimple.com 1589573370 86400 7200 604800 300",
+			TTL:     3600,
+			Regions: []string{"global"},
 		},
 	}
 
-	return fakeZoneRecordsResponse, nil
-}
-
-func (c fakeDNSimpleClient) zoneExists(ctx context.Context, accountID string, zoneName string) error {
-	return nil
+	return fakeZoneRecords, nil
 }
 
 func TestDNSimple(t *testing.T) {

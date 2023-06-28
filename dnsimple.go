@@ -52,7 +52,7 @@ func New(ctx context.Context, accountId string, client dnsimpleAPIService, ident
 	for zoneName, hostedZoneRegions := range keys {
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		err := client.zoneExists(ctx, accountId, zoneName)
+		_, err := client.getZone(ctx, accountId, zoneName)
 		if err != nil {
 			return nil, err
 		}
@@ -239,12 +239,12 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				errc <- err
 			}()
 
-			var response *dnsimple.ZoneRecordsResponse
+			var zoneRecords []dnsimple.ZoneRecord
 
 			options := &dnsimple.ZoneRecordListOptions{}
 			options.PerPage = dnsimple.Int(100)
 
-			response, err = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
+			zoneRecords, err = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
 			if err != nil {
 				err = fmt.Errorf("failed to list resource records for %v from dnsimple: %v", zoneName, err)
 				return
@@ -255,7 +255,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)
 
-				if err := updateZoneFromRecords(zoneName, response.Data, regionalZone.region, newPools, newZone); err != nil {
+				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone); err != nil {
 					// Maybe unsupported record type. Log and carry on.
 					log.Warningf("failed to process resource records: %v", err)
 				}
