@@ -45,14 +45,14 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, client dnsimpleAPIService, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, client dnsimpleAPIService, keys map[string][]string, opts Options) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
 	for zoneName, hostedZoneRegions := range keys {
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		_, err := client.getZone(ctx, accountId, zoneName)
+		_, err := client.getZone(ctx, opts.accountId, zoneName)
 		if err != nil {
 			return nil, err
 		}
@@ -64,14 +64,14 @@ func New(ctx context.Context, accountId string, client dnsimpleAPIService, ident
 		}
 	}
 	return &DNSimple{
-		accountId:  accountId,
+		accountId:  opts.accountId,
 		client:     client,
-		identifier: identifier,
-		refresh:    refresh,
+		identifier: opts.identifier,
+		refresh:    opts.refresh,
 		upstream:   upstream.New(),
 		zoneNames:  zoneNames,
 		zones:      zones,
-		maxRetries: maxRetries,
+		maxRetries: opts.maxRetries,
 	}, nil
 }
 

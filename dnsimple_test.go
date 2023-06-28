@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
 	"github.com/coredns/coredns/plugin/pkg/fall"
@@ -88,7 +87,9 @@ func (c fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID strin
 func TestDNSimple(t *testing.T) {
 	ctx := context.Background()
 
-	r, err := New(ctx, "testAccountId", fakeDNSimpleClient{}, "testIdentifier", map[string][]string{"example.bad.": {""}}, time.Duration(1)*time.Minute, 3)
+	opts := Options{}
+
+	r, err := New(ctx, fakeDNSimpleClient{}, map[string][]string{"example.bad.": {""}}, opts)
 	if err != nil {
 		t.Fatalf("failed to create dnsimple: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestDNSimple(t *testing.T) {
 		t.Fatalf("expected errors for zone bad.")
 	}
 
-	r, err = New(ctx, "testAccountId", fakeDNSimpleClient{}, "testIdentifier", map[string][]string{"example.org.": {"AMS"}}, time.Duration(1)*time.Minute, 3)
+	r, err = New(ctx, fakeDNSimpleClient{}, map[string][]string{"example.org.": {"AMS"}}, opts)
 	t.Logf("zoneNames: %v", r.zoneNames)
 	t.Logf("zones: %v", r.zones)
 	if err != nil {
