@@ -203,10 +203,10 @@ type updateZoneStatusMessage struct {
 }
 
 type updateZoneStatusRequest struct {
-	Resource string `json:"resource"`
-	State    string `json:"state"`
-	Title    string `json:"title"`
-	Message  string `json:"message"`
+	Resource string                  `json:"resource"`
+	State    string                  `json:"state"`
+	Title    string                  `json:"title"`
+	Data     updateZoneStatusMessage `json:"data"`
 }
 
 func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) []updateZoneRecordFailure {
@@ -328,19 +328,13 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			}
 			failedRecords := make([]updateZoneRecordFailure, len(errorByRecordId))
 			for _, f := range errorByRecordId {
+				// Limit to 100 only to avoid excessively large status update payload.
+				if len(failedRecords) >= 100 {
+					break
+				}
 				failedRecords = append(failedRecords, f)
 			}
 
-			statusMessage := updateZoneStatusMessage{
-				Time:              time.Now().UTC().Format(time.RFC3339),
-				CorednsIdentifier: h.identifier,
-				Error:             zoneError,
-				FailedRecords:     failedRecords,
-			}
-			statusMessageJson, err := json.Marshal(statusMessage)
-			if err != nil {
-				panic(fmt.Errorf("failed to serialise status message: %v", err))
-			}
 			state := "ok"
 			if zoneError != "" || len(failedRecords) > 0 {
 				state = "error"
@@ -349,7 +343,12 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				Resource: fmt.Sprintf("zone:%d", z[0].id),
 				State:    state,
 				Title:    fmt.Sprintf("CoreDNS %s %s", h.identifier, state),
-				Message:  string(statusMessageJson),
+				Data: updateZoneStatusMessage{
+					Time:              time.Now().UTC().Format(time.RFC3339),
+					CorednsIdentifier: h.identifier,
+					Error:             zoneError,
+					FailedRecords:     failedRecords,
+				},
 			}
 			statusJson, err := json.Marshal(status)
 			if err != nil {
