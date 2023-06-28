@@ -8,7 +8,7 @@ import (
 )
 
 func TestSetupDNSimple(t *testing.T) {
-	f = func(ctx context.Context, opt Options) (dnsimpleAPIService, error) {
+	dnsimpleService = func(ctx context.Context, opt Options) (dnsimpleAPIService, error) {
 		return fakeDNSimpleClient{}, nil
 	}
 
