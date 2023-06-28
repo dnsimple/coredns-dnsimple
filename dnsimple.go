@@ -247,6 +247,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, rec.Type, rec.Content)
 		rr, err := dns.NewRR(rfc1035)
 		if err != nil {
+			log.Errorf("failed to parse resource record: %v", err)
 			failures = append(failures, updateZoneRecordFailure{
 				Record: rec,
 				Error:  fmt.Sprintf("failed to parse resource record: %v", err),
@@ -257,6 +258,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		log.Debugf("inserting record %s", rfc1035)
 		err = zone.Insert(rr)
 		if err != nil {
+			log.Errorf("failed to insert resource record: %v", err)
 			failures = append(failures, updateZoneRecordFailure{
 				Record: rec,
 				Error:  fmt.Sprintf("failed to insert resource record: %v", err),
@@ -293,6 +295,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 						break
 					}
 					if i == 1+h.maxRetries {
+						log.Errorf("failed to list records: %v", listErr)
 						zoneError = fmt.Sprintf("failed to list records: %v", listErr)
 						break outer
 					}
