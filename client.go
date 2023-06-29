@@ -3,7 +3,6 @@ package dnsimple
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/dnsimple/dnsimple-go/dnsimple"
@@ -17,13 +16,13 @@ type dnsimpleClient struct {
 // dnsimpleService is an interface for dnsimpleClient.
 type dnsimpleService interface {
 	getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error)
-	listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error)
+	listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error)
 }
 
 // getZone is a wrapper method around `dnsimple.Client.Zones.GetZone`
 // it checks if a zone exists in DNSimple.
 func (c dnsimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
-	response, err := c.Zones.GetZone(ctx, accountID, strings.TrimSuffix(zoneName, "."))
+	response, err := c.Zones.GetZone(ctx, accountID, zoneName)
 	if err != nil {
 		return nil, err
 	}
@@ -32,9 +31,12 @@ func (c dnsimpleClient) getZone(ctx context.Context, accountID string, zoneName 
 
 // listZoneRecords is a wrapper for `dnsimple.Client.Zones.ListRecords`.
 // It fetches and returns all record sets for a zone handling pagination.
-func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
+func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error) {
 	var err error
 	var rs []dnsimple.ZoneRecord
+
+	listOptions := &dnsimple.ZoneRecordListOptions{}
+	listOptions.PerPage = dnsimple.Int(100)
 
 	// Fetch all records for the zone.
 	for {
@@ -42,7 +44,7 @@ func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, z
 		for i := 1; i <= 1+maxRetries; i++ {
 			var listErr error
 			// Our API does not expect the zone name to end with a dot.
-			response, listErr = c.Zones.ListRecords(ctx, accountID, strings.TrimSuffix(zoneName, "."), options)
+			response, listErr = c.Zones.ListRecords(ctx, accountID, zoneName, listOptions)
 			if listErr == nil {
 				break
 			}
@@ -58,7 +60,7 @@ func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, z
 		if response.Pagination.CurrentPage >= response.Pagination.TotalPages {
 			break
 		}
-		options.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
+		listOptions.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
 	}
 
 	return rs, nil

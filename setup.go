@@ -55,11 +55,11 @@ func setup(c *caddy.Controller) error {
 			if len(parts) < 1 {
 				return plugin.Error("dnsimple", c.Errf("invalid zone %q", args[i]))
 			}
-			dns, hostedZoneRegion := parts[0], "global"
-			if len(parts) > 1 {
-				hostedZoneRegion = parts[1]
+			zone, region := parts[0], "global"
+			if len(parts) > 1 && parts[1] != "" {
+				region = parts[1]
 			}
-			if dns == "" || hostedZoneRegion == "" {
+			if zone == "" || region == "" {
 				return plugin.Error("dnsimple", c.Errf("invalid zone %q", args[i]))
 			}
 			if _, ok := keyPairs[args[i]]; ok {
@@ -67,7 +67,7 @@ func setup(c *caddy.Controller) error {
 			}
 
 			keyPairs[args[i]] = struct{}{}
-			keys[dns] = append(keys[dns], hostedZoneRegion)
+			keys[zone] = append(keys[zone], region)
 		}
 
 		// TODO: set to warn when no zones are defined
@@ -78,13 +78,13 @@ func setup(c *caddy.Controller) error {
 		for c.NextBlock() {
 			switch c.Val() {
 			case "access_token":
-				v := c.RemainingArgs()
-				if len(v) < 2 {
-					return plugin.Error("dnsimple", c.Errf("invalid access token: '%v'", v))
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				opts.accessToken = v[1]
-				// TODO We should clarify why this is bad.
-				log.Warning("consider using alternative ways of providing credentials, such as environment variables")
+				if c.Val() != "" {
+					log.Warning("consider using alternative ways of providing credentials, such as environment variables")
+				}
+				opts.accessToken = c.Val()
 			case "account_id":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())

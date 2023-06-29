@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,24 +20,22 @@ import (
 
 // DNSimple is a plugin that returns RR from DNSimple.
 type DNSimple struct {
-	Next plugin.Handler
 	Fall fall.F
+	Next plugin.Handler
 
-	// Each zone name contains a trailing dot.
-	zoneNames  []string
-	client     dnsimpleService
 	accountId  string
+	client     dnsimpleService
 	identifier string
-	upstream   *upstream.Upstream
-	refresh    time.Duration
+	lock       sync.RWMutex
 	maxRetries int
-
-	lock  sync.RWMutex
-	zones zones
+	refresh    time.Duration
+	upstream   *upstream.Upstream
+	zoneNames  []string // set using the zone object fqdn
+	zones      zones
 }
 
 type zone struct {
-	// This contains the trailing dot.
+	fqdn   string // fqdn containing the trailing dot
 	name   string
 	pools  map[string][]string
 	region string
@@ -49,18 +48,21 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
-	for zoneName, hostedZoneRegions := range keys {
+	for fqdn, regions := range keys {
+		fqdn = dns.Fqdn(fqdn)
+		name := strings.TrimSuffix(fqdn, ".")
+
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		_, err := client.getZone(ctx, opts.accountId, zoneName)
+		_, err := client.getZone(ctx, opts.accountId, name)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := zones[zoneName]; !ok {
-			zoneNames = append(zoneNames, zoneName)
+		if _, ok := zones[fqdn]; !ok {
+			zoneNames = append(zoneNames, fqdn)
 		}
-		for _, hostedZoneRegion := range hostedZoneRegions {
-			zones[zoneName] = append(zones[zoneName], &zone{name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
+		for _, region := range regions {
+			zones[fqdn] = append(zones[fqdn], &zone{fqdn: fqdn, name: name, region: region, zone: file.NewZone(fqdn, "")})
 		}
 	}
 	return &DNSimple{
@@ -183,7 +185,6 @@ func recordInZoneRegion(recordRegions []string, zoneRegion string) bool {
 }
 
 func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) error {
-	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	for _, rec := range records {
 		var fqdn string
 		if rec.Name == "" {
@@ -210,7 +211,9 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			}
 			pools[fqdn] = append(pools[fqdn], rec.Content)
 			if !isFirst {
-				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
+				// We have already inserted a record for this POOL name, there's no point to adding more.
+				// As an interesting side note, the file plugin does not crash on multiple CNAME records with
+				// the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
 				continue
 			}
 		}
@@ -229,7 +232,6 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 }
 
 func (h *DNSimple) updateZones(ctx context.Context) error {
-	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
 	errc := make(chan error)
 	defer close(errc)
 	for zoneName, z := range h.zones {
@@ -241,10 +243,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			var zoneRecords []dnsimple.ZoneRecord
 
-			options := &dnsimple.ZoneRecordListOptions{}
-			options.PerPage = dnsimple.Int(100)
-
-			zoneRecords, err = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
+			zoneRecords, err = h.client.listZoneRecords(ctx, h.accountId, z[0].name, h.maxRetries)
 			if err != nil {
 				err = fmt.Errorf("failed to list resource records for %v from dnsimple: %v", zoneName, err)
 				return
@@ -260,6 +259,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					log.Warningf("failed to process resource records: %v", err)
 				}
 
+				log.Debugf("updating zone %s with region %s using cluster identifer %s", regionalZone.name, regionalZone.name, h.identifier)
 				h.lock.Lock()
 				(*z[i]).pools = newPools
 				(*z[i]).zone = newZone

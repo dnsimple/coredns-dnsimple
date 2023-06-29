@@ -18,11 +18,34 @@ func TestSetupDNSimple(t *testing.T) {
 		body          string
 		expectedError bool
 	}{
-		{`dnsimple`, true}, // TODO: skip and warn when no zones are defined
+		{`dnsimple`, true},
 		{`dnsimple :`, true},
 		{`dnsimple ::`, true},
 		{`dnsimple example.org`, false},
+		{`dnsimple example.org:`, false},
+		{`dnsimple example.org.`, false},
 		{`dnsimple example.org:AMS { }`, false},
+		{`dnsimple example.org { 
+			access_token
+		}`, true},
+		{`dnsimple example.org { 
+			account_id 12345
+		}`, false},
+		{`dnsimple example.org { 
+			base_url https://api.dnsimple.com/
+		}`, false},
+		{`dnsimple example.org { 
+			identifier example
+		}`, false},
+		{`dnsimple example.org { 
+			max_retries 10
+		}`, false},
+		{`dnsimple example.org { 
+			refresh 1h
+		}`, false},
+		{`dnsimple example.org { 
+			refresh 2s
+		}`, false},
 		{`dnsimple example.org { 
 			wat
 		}`, true},
@@ -33,9 +56,9 @@ func TestSetupDNSimple(t *testing.T) {
 		err := setup(c)
 
 		if test.expectedError {
-			assert.Error(t, err, "Expected error, but got none")
+			assert.Error(t, err, "Expected error for %s, but got none", test.body)
 		} else {
-			assert.NoError(t, err, "Unexpected error occurred")
+			assert.NoError(t, err, "Unexpected error occurred for %s", test.body)
 		}
 	}
 }
