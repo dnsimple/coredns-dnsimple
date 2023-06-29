@@ -12,19 +12,21 @@ import (
 	"github.com/coredns/coredns/request"
 	"github.com/dnsimple/dnsimple-go/dnsimple"
 	"github.com/miekg/dns"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 type fakeDNSimpleClient struct {
-	*dnsimple.Client
+	mock.Mock
 }
 
-func (c fakeDNSimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
+func (m *fakeDNSimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
 	return &dnsimple.Zone{
 		Name: "example.org",
 	}, nil
 }
 
-func (c fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
+func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
 	if zoneName == "example.bad." {
 		return nil, errors.New("example.bad. zone is bad")
 	}
@@ -86,10 +88,10 @@ func (c fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID strin
 
 func TestDNSimple(t *testing.T) {
 	ctx := context.Background()
-
+	fakeClient := new(fakeDNSimpleClient)
 	opts := Options{}
 
-	r, err := New(ctx, fakeDNSimpleClient{}, map[string][]string{"example.bad.": {""}}, opts)
+	r, err := New(ctx, fakeClient, map[string][]string{"example.bad.": {""}}, opts)
 	if err != nil {
 		t.Fatalf("failed to create dnsimple: %v", err)
 	}
@@ -97,7 +99,7 @@ func TestDNSimple(t *testing.T) {
 		t.Fatalf("expected errors for zone bad.")
 	}
 
-	r, err = New(ctx, fakeDNSimpleClient{}, map[string][]string{"example.org.": {"AMS"}}, opts)
+	r, err = New(ctx, fakeClient, map[string][]string{"example.org.": {"AMS"}}, opts)
 	t.Logf("zoneNames: %v", r.zoneNames)
 	t.Logf("zones: %v", r.zones)
 	if err != nil {
@@ -190,21 +192,14 @@ func TestDNSimple(t *testing.T) {
 		rec := dnstest.NewRecorder(&test.ResponseWriter{})
 		code, err := r.ServeDNS(ctx, rec, req)
 
-		if err != tc.expectedErr {
-			t.Fatalf("Test %d: Expected error %v, but got %v", ti, tc.expectedErr, err)
-		}
-		if code != int(tc.wantRetCode) {
-			t.Fatalf("Test %d: Expected returned status code %s, but got %s", ti, dns.RcodeToString[tc.wantRetCode], dns.RcodeToString[code])
-		}
-
-		if tc.wantMsgRCode != rec.Msg.Rcode {
-			t.Errorf("Test %d: Unexpected msg status code. Want: %s, got: %s", ti, dns.RcodeToString[tc.wantMsgRCode], dns.RcodeToString[rec.Msg.Rcode])
-		}
+		assert.Equal(t, tc.expectedErr, err, "Test %d: Expected error %v, but got %v", ti, tc.expectedErr, err)
+		assert.Equal(t, int(tc.wantRetCode), code, "Test %d: Expected returned status code %s, but got %s", ti, dns.RcodeToString[tc.wantRetCode], dns.RcodeToString[code])
+		assert.Equal(t, tc.wantMsgRCode, rec.Msg.Rcode, "Test %d: Unexpected msg status code. Want: %s, got: %s", ti, dns.RcodeToString[tc.wantMsgRCode], dns.RcodeToString[rec.Msg.Rcode])
 
 		// Handle POOL tests.
 		if tc.wantPool != nil {
 			matchFound := false
-			for _, gotAnswer := range rec.Msg.Answer {
+			for i, gotAnswer := range rec.Msg.Answer {
 				for _, expectedAnswer := range tc.wantPool {
 					if gotAnswer.String() == expectedAnswer {
 						matchFound = true
@@ -212,31 +207,21 @@ func TestDNSimple(t *testing.T) {
 					}
 				}
 				if !matchFound {
-					t.Errorf("Test %d: Unexpected answer.\nWant: one of %v\nGot:\n\t%s", ti, tc.wantPool, gotAnswer)
+					assert.Failf(t, "Test %d: Unexpected answer.\nWant: one of %v\nGot:\n\t%s", tc.wantPool[i], tc.wantPool, gotAnswer)
 				}
 			}
-		} else if len(tc.wantAnswer) != len(rec.Msg.Answer) {
-			t.Errorf("Test %d: Unexpected number of Answers. Want: %d, got: %d", ti, len(tc.wantAnswer), len(rec.Msg.Answer))
 		} else {
+			assert.Len(t, rec.Msg.Answer, len(tc.wantAnswer), "Test %d: Unexpected number of Answers. Want: %d, got: %d", ti, len(tc.wantAnswer), len(rec.Msg.Answer))
 			for i, gotAnswer := range rec.Msg.Answer {
-				if gotAnswer.String() != tc.wantAnswer[i] {
-					t.Errorf("Test %d: Unexpected answer.\nWant:\n\t%s\nGot:\n\t%s", ti, tc.wantAnswer[i], gotAnswer)
-				}
+				assert.Equal(t, tc.wantAnswer[i], gotAnswer.String(), "Test %d: Unexpected answer.\nWant:\n\t%s\nGot:\n\t%s", ti, tc.wantAnswer[i], gotAnswer)
 			}
 		}
 
-		if len(tc.wantNS) != len(rec.Msg.Ns) {
-			t.Errorf("Test %d: Unexpected NS number. Want: %d, got: %d", ti, len(tc.wantNS), len(rec.Msg.Ns))
-		} else {
-			for i, ns := range rec.Msg.Ns {
-				got, ok := ns.(*dns.SOA)
-				if !ok {
-					t.Errorf("Test %d: Unexpected NS type. Want: SOA, got: %v", ti, reflect.TypeOf(got))
-				}
-				if got.String() != tc.wantNS[i] {
-					t.Errorf("Test %d: Unexpected NS.\nWant: %v\nGot: %v", ti, tc.wantNS[i], got)
-				}
-			}
+		assert.Len(t, rec.Msg.Ns, len(tc.wantNS), "Test %d: Unexpected NS number. Want: %d, got: %d", ti, len(tc.wantNS), len(rec.Msg.Ns))
+		for i, ns := range rec.Msg.Ns {
+			got, ok := ns.(*dns.SOA)
+			assert.True(t, ok, "Test %d: Unexpected NS type. Want: SOA, got: %v", ti, reflect.TypeOf(got))
+			assert.Equal(t, tc.wantNS[i], got.String(), "Test %d: Unexpected NS.\nWant: %v\nGot: %v", ti, tc.wantNS[i], got)
 		}
 	}
 }

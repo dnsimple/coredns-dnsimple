@@ -9,15 +9,15 @@ import (
 	"github.com/dnsimple/dnsimple-go/dnsimple"
 )
 
-// dnsimpleAPIService is an interface for `dnsimpleClient`.
-type dnsimpleAPIService interface {
-	getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error)
-	listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error)
-}
-
 // dnsimpleClient is a wrapper for `dnsimple.Client`.
 type dnsimpleClient struct {
 	*dnsimple.Client
+}
+
+// dnsimpleService is an interface for dnsimpleClient.
+type dnsimpleService interface {
+	getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error)
+	listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error)
 }
 
 // getZone is a wrapper method around `dnsimple.Client.Zones.GetZone`

@@ -5,11 +5,13 @@ import (
 	"testing"
 
 	"github.com/coredns/caddy"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetupDNSimple(t *testing.T) {
-	dnsimpleService = func(ctx context.Context, opt Options) (dnsimpleAPIService, error) {
-		return fakeDNSimpleClient{}, nil
+	fakeClient := new(fakeDNSimpleClient)
+	service = func(ctx context.Context, opt Options) (dnsimpleService, error) {
+		return fakeClient, nil
 	}
 
 	tests := []struct {
@@ -28,8 +30,12 @@ func TestSetupDNSimple(t *testing.T) {
 
 	for _, test := range tests {
 		c := caddy.NewTestController("dns", test.body)
-		if err := setup(c); (err == nil) == test.expectedError {
-			t.Errorf("Unexpected errors: %v", err)
+		err := setup(c)
+
+		if test.expectedError {
+			assert.Error(t, err, "Expected error, but got none")
+		} else {
+			assert.NoError(t, err, "Unexpected error occurred")
 		}
 	}
 }

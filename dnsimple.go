@@ -24,7 +24,7 @@ type DNSimple struct {
 
 	// Each zone name contains a trailing dot.
 	zoneNames  []string
-	client     dnsimpleAPIService
+	client     dnsimpleService
 	accountId  string
 	identifier string
 	upstream   *upstream.Upstream
@@ -45,7 +45,7 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, client dnsimpleAPIService, keys map[string][]string, opts Options) (*DNSimple, error) {
+func New(ctx context.Context, client dnsimpleService, keys map[string][]string, opts Options) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
