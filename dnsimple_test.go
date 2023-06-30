@@ -34,22 +34,29 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 	fakeZoneRecords := []dnsimple.ZoneRecord{
 		{
 			Name:    "",
+			Type:    "ALIAS",
+			Content: "example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "record",
 			Type:    "A",
 			Content: "1.2.3.4",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
 		{
-			Name:    "",
+			Name:    "record",
 			Type:    "AAAA",
 			Content: "2001:db8:85a3::8a2e:370:7334",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
 		{
-			Name:    "www",
+			Name:    "cname",
 			Type:    "CNAME",
-			Content: "example.org.",
+			Content: "record.example.org.",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
@@ -71,6 +78,13 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 			Name:    "pool",
 			Type:    "POOL",
 			Content: "b.pool.example.com",
+			TTL:     300,
+			Regions: []string{"global"},
+		},
+		{
+			Name:    "url",
+			Type:    "URL",
+			Content: "https://example.org",
 			TTL:     300,
 			Regions: []string{"global"},
 		},
@@ -143,29 +157,35 @@ func TestDNSimple(t *testing.T) {
 		wantNS       []string
 		expectedErr  error
 	}{
-		// 0. example.org A found - success.
+		// 0. example.org ALIAS -> A found - success.
 		{
 			qname:      "example.org",
 			qtype:      dns.TypeA,
-			wantAnswer: []string{"example.org.	300	IN	A	1.2.3.4"},
+			wantAnswer: []string{"example.org.	300	IN	A	93.184.216.34"},
 		},
-		// 1. example.org AAAA found - success.
+		// 1. record.example.org A found - success.
 		{
-			qname:      "example.org",
-			qtype:      dns.TypeAAAA,
-			wantAnswer: []string{"example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
+			qname:      "record.example.org",
+			qtype:      dns.TypeA,
+			wantAnswer: []string{"record.example.org.	300	IN	A	1.2.3.4"},
 		},
-		// 2. www.example.org points to example.org CNAME.
+		// 2. record.example.org AAAA found - success.
+		{
+			qname:      "record.example.org",
+			qtype:      dns.TypeAAAA,
+			wantAnswer: []string{"record.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
+		},
+		// 3. www.example.org points to example.org CNAME.
 		// Query must return both CNAME and A records.
 		{
-			qname: "www.example.org",
+			qname: "cname.example.org",
 			qtype: dns.TypeA,
 			wantAnswer: []string{
-				"www.example.org.	300	IN	CNAME	example.org.",
-				"example.org.	300	IN	A	1.2.3.4",
+				"cname.example.org.	300	IN	CNAME	record.example.org.",
+				"record.example.org.	300	IN	A	1.2.3.4",
 			},
 		},
-		// 3. Region not configured. Return SOA record.
+		// 4. Region not configured. Return SOA record.
 		{
 			qname:        "another-region.example.org",
 			qtype:        dns.TypeA,
@@ -173,7 +193,7 @@ func TestDNSimple(t *testing.T) {
 			wantMsgRCode: dns.RcodeNameError,
 			wantNS:       []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
 		},
-		// 4. POOL record.
+		// 5. POOL record.
 		{
 			qname:       "pool.example.org",
 			qtype:       dns.TypeCNAME,
@@ -181,6 +201,16 @@ func TestDNSimple(t *testing.T) {
 			wantPool: []string{
 				"pool.example.org.	300	IN	CNAME	a.pool.example.com.",
 				"pool.example.org.	300	IN	CNAME	b.pool.example.com.",
+			},
+		},
+		// 6. URL record.
+		{
+			qname: "url.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"url.example.org.	300	IN	A	3.12.205.86",
+				"url.example.org.	300	IN	A	3.13.31.214",
+				"url.example.org.	300	IN	A	52.15.124.193",
 			},
 		},
 	}
