@@ -3,7 +3,6 @@ package dnsimple
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/dnsimple/dnsimple-go/dnsimple"
