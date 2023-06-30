@@ -10,7 +10,7 @@ import (
 
 func TestSetupDNSimple(t *testing.T) {
 	fakeClient := new(fakeDNSimpleClient)
-	service = func(ctx context.Context, opt Options) (dnsimpleService, error) {
+	newDnsimpleService = func(ctx context.Context, opt Options) (dnsimpleService, error) {
 		return fakeClient, nil
 	}
 

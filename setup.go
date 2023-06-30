@@ -31,7 +31,7 @@ type Options struct {
 }
 
 // exposed for testing
-var service = func(ctx context.Context, opts Options) (dnsimpleService, error) {
+var newDnsimpleService = func(ctx context.Context, opts Options) (dnsimpleService, error) {
 	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, opts.accessToken))
 	client.BaseURL = opts.baseUrl
 	client.SetUserAgent("coredns-plugin-dnsimple")
@@ -159,7 +159,7 @@ func setup(c *caddy.Controller) error {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client, err := service(ctx, opts)
+		client, err := newDnsimpleService(ctx, opts)
 		if err != nil {
 			cancel()
 			return err
