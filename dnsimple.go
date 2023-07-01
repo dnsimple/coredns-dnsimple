@@ -183,7 +183,7 @@ func recordInZoneRegion(recordRegions []string, zoneRegion string) bool {
 	return false
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) error {
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone) error {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	for _, rec := range records {
 		var fqdn string
@@ -240,11 +240,16 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				content: rec.Content,
 			})
 		} else if rec.Type == "URL" {
-			rawRecords = append(rawRecords,
-				rawRecord{typ: "A", content: "3.12.205.86"},
-				rawRecord{typ: "A", content: "3.13.31.214"},
-				rawRecord{typ: "A", content: "52.15.124.193"},
-			)
+			for _, res := range urlSvcIps {
+				typ := "AAAA"
+				if res.To4() != nil {
+					typ = "A"
+				}
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     typ,
+					content: res.String(),
+				})
+			}
 		} else {
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     rec.Type,
@@ -271,6 +276,12 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
 	errc := make(chan error)
 	defer close(errc)
+
+	urlSvcIps, err := net.LookupIP("coredns-url-record-target.dnsimple.net")
+	if err != nil {
+		errc <- fmt.Errorf("failed to fetch URL record target: %v", err)
+	}
+
 	for zoneName, z := range h.zones {
 		go func(zoneName string, z []*zone) {
 			var err error
@@ -294,7 +305,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)
 
-				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone); err != nil {
+				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone); err != nil {
 					// Maybe unsupported record type. Log and carry on.
 					log.Warningf("failed to process resource records: %v", err)
 				}
