@@ -291,7 +291,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 	errc := make(chan error)
 	defer close(errc)
 
-	urlSvcIps, err := net.LookupIP("coredns-url-record-target.dnsimple.net")
+	urlSvcIps, err := net.LookupIP("coredns-url-record-target.dns.solutions")
 	if err != nil {
 		errc <- fmt.Errorf("failed to fetch URL record target: %v", err)
 	}
