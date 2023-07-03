@@ -38,6 +38,32 @@ func retryable(maxRetries int, cb func() error) error {
 	return nil
 }
 
+type DNSimpleApiCaller func(baseUrl string, path string, accessToken string, userAgent string, body []byte) error
+
+func DefaultDNSimpleApiCaller(baseUrl string, path string, accessToken string, userAgent string, body []byte) error {
+	url := fmt.Sprintf("%s%s", baseUrl, path)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("user-agent", userAgent)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		body, err := io.ReadAll(res.Body)
+		if err == nil {
+			return fmt.Errorf("bad status code of %d: %s", res.StatusCode, string(body))
+		}
+		return fmt.Errorf("bad status code of %d (response could not be read)", res.StatusCode)
+	}
+	return nil
+}
+
 // DNSimple is a plugin that returns RR from DNSimple.
 type DNSimple struct {
 	Next plugin.Handler
@@ -48,6 +74,7 @@ type DNSimple struct {
 	client      *dnsimple.Client
 	accountId   string
 	accessToken string
+	apiCaller   DNSimpleApiCaller
 	identifier  string
 	upstream    *upstream.Upstream
 	refresh     time.Duration
@@ -68,7 +95,7 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, accessToken string, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, accountId string, accessToken string, apiCaller DNSimpleApiCaller, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
@@ -87,15 +114,16 @@ func New(ctx context.Context, accountId string, accessToken string, client *dnsi
 		}
 	}
 	return &DNSimple{
-		accountId:   accountId,
 		accessToken: accessToken,
+		accountId:   accountId,
+		apiCaller:   apiCaller,
 		client:      client,
 		identifier:  identifier,
+		maxRetries:  maxRetries,
 		refresh:     refresh,
 		upstream:    upstream.New(),
 		zoneNames:   zoneNames,
 		zones:       zones,
-		maxRetries:  maxRetries,
 	}, nil
 }
 
@@ -121,6 +149,16 @@ func (h *DNSimple) Run(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+func (h *DNSimple) callApi(path string, body []byte) error {
+	return h.apiCaller(
+		h.client.BaseURL,
+		path,
+		h.accessToken,
+		h.client.UserAgent,
+		body,
+	)
 }
 
 // ServeDNS implements the plugin.Handler.ServeDNS.
@@ -367,31 +405,11 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			if err != nil {
 				panic(fmt.Errorf("failed to serialise status request: %v", err))
 			}
-			trySendStatus := func() error {
-				url := fmt.Sprintf("%s/v2/%s/platform/statuses", h.client.BaseURL, h.accountId)
-				req, err := http.NewRequest("POST", url, bytes.NewBuffer(statusJson))
-				if err != nil {
-					return err
-				}
-				req.Header.Set("authorization", fmt.Sprintf("Bearer %s", h.accessToken))
-				req.Header.Set("content-type", "application/json")
-				req.Header.Set("user-agent", h.client.UserAgent)
-				res, err := http.DefaultClient.Do(req)
-				if err != nil {
-					return err
-				}
-				defer res.Body.Close()
-				if res.StatusCode >= 300 {
-					body, err := io.ReadAll(res.Body)
-					if err == nil {
-						return fmt.Errorf("bad status code of %d: %s", res.StatusCode, string(body))
-					}
-					return fmt.Errorf("bad status code of %d (response could not be read)", res.StatusCode)
-				}
-				return nil
-			}
 			sendStatusError := retryable(h.maxRetries, func() (err error) {
-				err = trySendStatus()
+				err = h.callApi(
+					fmt.Sprintf("/v2/%s/platform/statuses", h.accountId),
+					statusJson,
+				)
 				return
 			})
 			if sendStatusError != nil {

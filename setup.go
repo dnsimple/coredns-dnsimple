@@ -152,7 +152,7 @@ func setup(c *caddy.Controller) error {
 			client.BaseURL = "https://api.sandbox.dnsimple.com"
 		}
 
-		h, err := New(ctx, accountId, accessToken, client, identifier, keys, refresh, maxRetries)
+		h, err := New(ctx, accountId, accessToken, DefaultDNSimpleApiCaller, client, identifier, keys, refresh, maxRetries)
 		if err != nil {
 			cancel()
 			return plugin.Error("dnsimple", c.Errf("failed to create dnsimple plugin: %v", err))
