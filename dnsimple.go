@@ -24,13 +24,14 @@ type DNSimple struct {
 	Fall fall.F
 
 	// Each zone name contains a trailing dot.
-	zoneNames  []string
-	client     dnsimpleService
-	accountId  string
-	identifier string
-	upstream   *upstream.Upstream
-	refresh    time.Duration
-	maxRetries int
+	zoneNames   []string
+	client      dnsimpleService
+	dnsResolver *net.Resolver
+	accountId   string
+	identifier  string
+	upstream    *upstream.Upstream
+	refresh     time.Duration
+	maxRetries  int
 
 	lock  sync.RWMutex
 	zones zones
@@ -64,15 +65,28 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 			zones[zoneName] = append(zones[zoneName], &zone{name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
 		}
 	}
+	dnsResolver := net.DefaultResolver
+	if opts.customDnsResolver != "" {
+		dnsResolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{
+					Timeout: time.Second * 10,
+				}
+				return d.DialContext(ctx, network, opts.customDnsResolver)
+			},
+		}
+	}
 	return &DNSimple{
-		accountId:  opts.accountId,
-		client:     client,
-		identifier: opts.identifier,
-		refresh:    opts.refresh,
-		upstream:   upstream.New(),
-		zoneNames:  zoneNames,
-		zones:      zones,
-		maxRetries: opts.maxRetries,
+		accountId:   opts.accountId,
+		client:      client,
+		dnsResolver: dnsResolver,
+		identifier:  opts.identifier,
+		refresh:     opts.refresh,
+		upstream:    upstream.New(),
+		zoneNames:   zoneNames,
+		zones:       zones,
+		maxRetries:  opts.maxRetries,
 	}, nil
 }
 
@@ -183,7 +197,7 @@ func recordInZoneRegion(recordRegions []string, zoneRegion string) bool {
 	return false
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone) error {
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) error {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	for _, rec := range records {
 		var fqdn string
@@ -204,7 +218,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		rawRecords := make([]rawRecord, 0)
 
 		if rec.Type == "ALIAS" {
-			ips, err := net.LookupIP(rec.Content)
+			ips, err := dnsResolver.LookupIP(context.Background(), "ip", rec.Content)
 			if err != nil {
 				return fmt.Errorf("failed to resolve ALIAS record %s with error: %v", rec.Content, err)
 			}
@@ -305,7 +319,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)
 
-				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone); err != nil {
+				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone, h.dnsResolver); err != nil {
 					// Maybe unsupported record type. Log and carry on.
 					log.Warningf("failed to process resource records: %v", err)
 				}
