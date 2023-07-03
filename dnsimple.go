@@ -371,7 +371,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					return err
 				}
 				defer res.Body.Close()
-				if res.StatusCode < 200 || res.StatusCode > 299 {
+				if res.StatusCode >= 300 {
 					body, err := io.ReadAll(res.Body)
 					if err == nil {
 						return fmt.Errorf("bad status code of %d: %s", res.StatusCode, string(body))
