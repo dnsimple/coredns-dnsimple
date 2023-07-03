@@ -22,6 +22,22 @@ import (
 	"github.com/miekg/dns"
 )
 
+func retryable(maxRetries int, cb func() error) error {
+	for i := 1; i <= 1+maxRetries; i++ {
+		err := cb()
+		if err == nil {
+			break
+		}
+		if i == 1+maxRetries {
+			return err
+		}
+		log.Warningf("[attempt %d] %v", i, err)
+		// Exponential backoff.
+		time.Sleep((1 << i) * time.Second)
+	}
+	return nil
+}
+
 // DNSimple is a plugin that returns RR from DNSimple.
 type DNSimple struct {
 	Next plugin.Handler
@@ -274,8 +290,9 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for zoneName, z := range h.zones {
 		wg.Add(1)
+		defer wg.Done()
 		go func(zoneName string, z []*zone) {
-			zoneError := ""
+			var zoneError error = nil
 
 			// zoneRecords stores the complete set of zone records
 			var zoneRecords []dnsimple.ZoneRecord
@@ -284,24 +301,16 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			options.PerPage = dnsimple.Int(100)
 
 			// Fetch all records for the zone.
-		outer:
 			for {
 				var response *dnsimple.ZoneRecordsResponse
-				for i := 1; i <= 1+h.maxRetries; i++ {
-					var listErr error
+				zoneError = retryable(h.maxRetries, func() (listErr error) {
 					// Our API does not expect the zone name to end with a dot.
 					response, listErr = h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zoneName, "."), options)
-					if listErr == nil {
-						break
-					}
-					if i == 1+h.maxRetries {
-						log.Errorf("failed to list records: %v", listErr)
-						zoneError = fmt.Sprintf("failed to list records: %v", listErr)
-						break outer
-					}
-					log.Warningf("attempt %d failed to list records for zone %s, will retry: %v", i, zoneName, listErr)
-					// Exponential backoff.
-					time.Sleep((1 << i) * time.Second)
+					return
+				})
+				if zoneError != nil {
+					log.Errorf("failed to list records: %v", zoneError)
+					break
 				}
 				zoneRecords = append(zoneRecords, response.Data...)
 				if response.Pagination.CurrentPage >= response.Pagination.TotalPages {
@@ -311,7 +320,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			}
 
 			errorByRecordId := make(map[int64]updateZoneRecordFailure)
-			if zoneError == "" {
+			if zoneError == nil {
 				for i, regionalZone := range z {
 					newZone := file.NewZone(zoneName, "")
 					newZone.Upstream = h.upstream
@@ -338,8 +347,10 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			}
 
 			state := "ok"
-			if zoneError != "" || len(failedRecords) > 0 {
+			zoneErrorMessage := ""
+			if zoneError != nil || len(failedRecords) > 0 {
 				state = "error"
+				zoneErrorMessage = zoneError.Error()
 			}
 			status := updateZoneStatusRequest{
 				Resource: fmt.Sprintf("zone:%d", z[0].id),
@@ -348,7 +359,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				Data: updateZoneStatusMessage{
 					Time:              time.Now().UTC().Format(time.RFC3339),
 					CorednsIdentifier: h.identifier,
-					Error:             zoneError,
+					Error:             zoneErrorMessage,
 					FailedRecords:     failedRecords,
 				},
 			}
@@ -379,21 +390,13 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				}
 				return nil
 			}
-			for i := 1; i <= 1+h.maxRetries; i++ {
-				err := trySendStatus()
-				if err == nil {
-					break
-				}
-				if i == 1+h.maxRetries {
-					log.Errorf("failed to send status: %v", err)
-					break
-				}
-				log.Warningf("attempt %d failed to send status, will retry: %v", i, err)
-				// Exponential backoff.
-				time.Sleep((1 << i) * time.Second)
+			sendStatusError := retryable(h.maxRetries, func() (err error) {
+				err = trySendStatus()
+				return
+			})
+			if sendStatusError != nil {
+				log.Errorf("failed to send status: %v", sendStatusError)
 			}
-
-			wg.Done()
 		}(zoneName, z)
 	}
 	wg.Wait()
