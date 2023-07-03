@@ -329,13 +329,12 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					h.lock.Unlock()
 				}
 			}
-			failedRecords := make([]updateZoneRecordFailure, len(errorByRecordId))
+			failedRecords := make([]updateZoneRecordFailure, 0, 100)
 			for _, f := range errorByRecordId {
-				// Limit to 100 only to avoid excessively large status update payload.
+				failedRecords = append(failedRecords, f)
 				if len(failedRecords) >= 100 {
 					break
 				}
-				failedRecords = append(failedRecords, f)
 			}
 
 			state := "ok"
