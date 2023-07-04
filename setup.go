@@ -24,11 +24,11 @@ func init() { plugin.Register("dnsimple", setup) }
 const defaultUserAgent = "coredns-plugin-dnsimple"
 
 type Options struct {
-	accountId   string
-	apiCaller DNSimpleApiCaller
-	identifier  string
-	maxRetries  int
-	refresh     time.Duration
+	accountId  string
+	apiCaller  DNSimpleApiCaller
+	identifier string
+	maxRetries int
+	refresh    time.Duration
 }
 
 // exposed for testing

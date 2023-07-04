@@ -71,14 +71,14 @@ type DNSimple struct {
 	Fall fall.F
 
 	// Each zone name contains a trailing dot.
-	zoneNames   []string
+	zoneNames  []string
 	client     dnsimpleService
-	accountId   string
-	apiCaller   DNSimpleApiCaller
-	identifier  string
-	upstream    *upstream.Upstream
-	refresh     time.Duration
-	maxRetries  int
+	accountId  string
+	apiCaller  DNSimpleApiCaller
+	identifier string
+	upstream   *upstream.Upstream
+	refresh    time.Duration
+	maxRetries int
 
 	lock  sync.RWMutex
 	zones zones
@@ -115,7 +115,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 	}
 	return &DNSimple{
 		accountId:  opts.accountId,
-		apiCaller:   opts.apiCaller,
+		apiCaller:  opts.apiCaller,
 		client:     client,
 		identifier: opts.identifier,
 		maxRetries: opts.maxRetries,
