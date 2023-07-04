@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -71,14 +72,15 @@ type DNSimple struct {
 	Fall fall.F
 
 	// Each zone name contains a trailing dot.
-	zoneNames  []string
-	client     dnsimpleService
-	accountId  string
-	apiCaller  DNSimpleApiCaller
-	identifier string
-	upstream   *upstream.Upstream
-	refresh    time.Duration
-	maxRetries int
+	zoneNames   []string
+	client      dnsimpleService
+	dnsResolver *net.Resolver
+	apiCaller   DNSimpleApiCaller
+	accountId   string
+	identifier  string
+	upstream    *upstream.Upstream
+	refresh     time.Duration
+	maxRetries  int
 
 	lock  sync.RWMutex
 	zones zones
@@ -113,16 +115,29 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 			zones[zoneName] = append(zones[zoneName], &zone{id: res.ID, name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
 		}
 	}
+	dnsResolver := net.DefaultResolver
+	if opts.customDnsResolver != "" {
+		dnsResolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{
+					Timeout: time.Second * 10,
+				}
+				return d.DialContext(ctx, network, opts.customDnsResolver)
+			},
+		}
+	}
 	return &DNSimple{
-		accountId:  opts.accountId,
-		apiCaller:  opts.apiCaller,
-		client:     client,
-		identifier: opts.identifier,
-		maxRetries: opts.maxRetries,
-		refresh:    opts.refresh,
-		upstream:   upstream.New(),
-		zoneNames:  zoneNames,
-		zones:      zones,
+		accountId:   opts.accountId,
+		apiCaller:   opts.apiCaller,
+		client:      client,
+		dnsResolver: dnsResolver,
+		identifier:  opts.identifier,
+		maxRetries:  opts.maxRetries,
+		refresh:     opts.refresh,
+		upstream:    upstream.New(),
+		zoneNames:   zoneNames,
+		zones:       zones,
 	}, nil
 }
 
@@ -259,7 +274,7 @@ type updateZoneStatusRequest struct {
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) []updateZoneRecordFailure {
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	failures := make([]updateZoneRecordFailure, 0)
 	for _, rec := range records {
@@ -274,13 +289,38 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			continue
 		}
 
-		if rec.Type == "MX" {
-			// MX records have a priority and a content field.
-			rec.Content = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
+		type rawRecord struct {
+			typ     string
+			content string
 		}
+		rawRecords := make([]rawRecord, 0)
 
-		if rec.Type == "POOL" {
-			rec.Type = "CNAME"
+		if rec.Type == "ALIAS" {
+			ips, err := dnsResolver.LookupIP(context.Background(), "ip", rec.Content)
+			if err != nil {
+				failures = append(failures, updateZoneRecordFailure{
+					Record: rec,
+					Error:  fmt.Sprintf("failed to resolve ALIAS record %s with error: %v", rec.Content, err),
+				})
+				continue
+			}
+			for _, res := range ips {
+				typ := "AAAA"
+				if res.To4() != nil {
+					typ = "A"
+				}
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     typ,
+					content: res.String(),
+				})
+			}
+		} else if rec.Type == "MX" {
+			// MX records have a priority and a content field.
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "MX",
+				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
+			})
+		} else if rec.Type == "POOL" {
 			isFirst := false
 			if pools[fqdn] == nil {
 				pools[fqdn] = make([]string, 0)
@@ -291,29 +331,51 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
 				continue
 			}
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "CNAME",
+				content: rec.Content,
+			})
+		} else if rec.Type == "URL" {
+			for _, res := range urlSvcIps {
+				typ := "AAAA"
+				if res.To4() != nil {
+					typ = "A"
+				}
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     typ,
+					content: res.String(),
+				})
+			}
+		} else {
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     rec.Type,
+				content: rec.Content,
+			})
 		}
 
-		// Assemble RFC 1035 conforming record to pass into DNS scanner.
-		rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, rec.Type, rec.Content)
-		rr, err := dns.NewRR(rfc1035)
-		if err != nil {
-			log.Errorf("failed to parse resource record: %v", err)
-			failures = append(failures, updateZoneRecordFailure{
-				Record: rec,
-				Error:  fmt.Sprintf("failed to parse resource record: %v", err),
-			})
-			continue
-		}
+		for _, raw := range rawRecords {
+			// Assemble RFC 1035 conforming record to pass into DNS scanner.
+			rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, raw.typ, raw.content)
+			rr, err := dns.NewRR(rfc1035)
+			if err != nil {
+				log.Errorf("failed to parse resource record: %v", err)
+				failures = append(failures, updateZoneRecordFailure{
+					Record: rec,
+					Error:  fmt.Sprintf("failed to parse resource record: %v", err),
+				})
+				continue
+			}
 
-		log.Debugf("inserting record %s", rfc1035)
-		err = zone.Insert(rr)
-		if err != nil {
-			log.Errorf("failed to insert resource record: %v", err)
-			failures = append(failures, updateZoneRecordFailure{
-				Record: rec,
-				Error:  fmt.Sprintf("failed to insert resource record: %v", err),
-			})
-			continue
+			log.Debugf("inserting record %s", rfc1035)
+			err = zone.Insert(rr)
+			if err != nil {
+				log.Errorf("failed to insert resource record: %v", err)
+				failures = append(failures, updateZoneRecordFailure{
+					Record: rec,
+					Error:  fmt.Sprintf("failed to insert resource record: %v", err),
+				})
+				continue
+			}
 		}
 	}
 	return failures
@@ -322,6 +384,12 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 func (h *DNSimple) updateZones(ctx context.Context) error {
 	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
 	var wg sync.WaitGroup
+
+	urlSvcIps, err := net.LookupIP("coredns-url-record-target.dns.solutions")
+	if err != nil {
+		log.Errorf("failed to fetch URL record target: %v", err)
+	}
+
 	for zoneName, z := range h.zones {
 		wg.Add(1)
 		defer wg.Done()
@@ -347,7 +415,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					newPools := make(map[string][]string, 16)
 
 					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
-					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone)
+					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone, h.dnsResolver)
 					for _, f := range failedRecords {
 						errorByRecordId[f.Record.ID] = f
 					}

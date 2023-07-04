@@ -24,11 +24,12 @@ func init() { plugin.Register("dnsimple", setup) }
 const defaultUserAgent = "coredns-plugin-dnsimple"
 
 type Options struct {
-	accountId  string
-	apiCaller  DNSimpleApiCaller
-	identifier string
-	maxRetries int
-	refresh    time.Duration
+	accountId         string
+	apiCaller         DNSimpleApiCaller
+	customDnsResolver string
+	identifier        string
+	maxRetries        int
+	refresh           time.Duration
 }
 
 // exposed for testing
@@ -93,6 +94,11 @@ func setup(c *caddy.Controller) error {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
 				opts.accountId = c.Val()
+			case "custom_dns_resolver":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				opts.customDnsResolver = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
 			case "identifier":
