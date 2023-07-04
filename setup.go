@@ -22,12 +22,13 @@ var log = clog.NewWithPlugin("dnsimple")
 func init() { plugin.Register("dnsimple", setup) }
 
 type Options struct {
-	accessToken string
-	accountId   string
-	baseUrl     string
-	identifier  string
-	maxRetries  int
-	refresh     time.Duration
+	accessToken       string
+	accountId         string
+	baseUrl           string
+	customDnsResolver string
+	identifier        string
+	maxRetries        int
+	refresh           time.Duration
 }
 
 // exposed for testing
@@ -90,6 +91,11 @@ func setup(c *caddy.Controller) error {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
 				opts.accountId = c.Val()
+			case "custom_dns_resolver":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				opts.customDnsResolver = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
 			case "identifier":

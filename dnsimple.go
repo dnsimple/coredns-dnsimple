@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"sync"
 	"time"
 
@@ -23,13 +24,14 @@ type DNSimple struct {
 	Fall fall.F
 
 	// Each zone name contains a trailing dot.
-	zoneNames  []string
-	client     dnsimpleService
-	accountId  string
-	identifier string
-	upstream   *upstream.Upstream
-	refresh    time.Duration
-	maxRetries int
+	zoneNames   []string
+	client      dnsimpleService
+	dnsResolver *net.Resolver
+	accountId   string
+	identifier  string
+	upstream    *upstream.Upstream
+	refresh     time.Duration
+	maxRetries  int
 
 	lock  sync.RWMutex
 	zones zones
@@ -63,15 +65,28 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 			zones[zoneName] = append(zones[zoneName], &zone{name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
 		}
 	}
+	dnsResolver := net.DefaultResolver
+	if opts.customDnsResolver != "" {
+		dnsResolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{
+					Timeout: time.Second * 10,
+				}
+				return d.DialContext(ctx, network, opts.customDnsResolver)
+			},
+		}
+	}
 	return &DNSimple{
-		accountId:  opts.accountId,
-		client:     client,
-		identifier: opts.identifier,
-		refresh:    opts.refresh,
-		upstream:   upstream.New(),
-		zoneNames:  zoneNames,
-		zones:      zones,
-		maxRetries: opts.maxRetries,
+		accountId:   opts.accountId,
+		client:      client,
+		dnsResolver: dnsResolver,
+		identifier:  opts.identifier,
+		refresh:     opts.refresh,
+		upstream:    upstream.New(),
+		zoneNames:   zoneNames,
+		zones:       zones,
+		maxRetries:  opts.maxRetries,
 	}, nil
 }
 
@@ -182,7 +197,7 @@ func recordInZoneRegion(recordRegions []string, zoneRegion string) bool {
 	return false
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, zone *file.Zone) error {
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) error {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	for _, rec := range records {
 		var fqdn string
@@ -196,13 +211,34 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			continue
 		}
 
-		if rec.Type == "MX" {
-			// MX records have a priority and a content field.
-			rec.Content = fmt.Sprintf("%d %s", rec.Priority, rec.Content)
+		type rawRecord struct {
+			typ     string
+			content string
 		}
+		rawRecords := make([]rawRecord, 0)
 
-		if rec.Type == "POOL" {
-			rec.Type = "CNAME"
+		if rec.Type == "ALIAS" {
+			ips, err := dnsResolver.LookupIP(context.Background(), "ip", rec.Content)
+			if err != nil {
+				return fmt.Errorf("failed to resolve ALIAS record %s with error: %v", rec.Content, err)
+			}
+			for _, res := range ips {
+				typ := "AAAA"
+				if res.To4() != nil {
+					typ = "A"
+				}
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     typ,
+					content: res.String(),
+				})
+			}
+		} else if rec.Type == "MX" {
+			// MX records have a priority and a content field.
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "MX",
+				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
+			})
+		} else if rec.Type == "POOL" {
 			isFirst := false
 			if pools[fqdn] == nil {
 				pools[fqdn] = make([]string, 0)
@@ -213,17 +249,39 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
 				continue
 			}
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "CNAME",
+				content: rec.Content,
+			})
+		} else if rec.Type == "URL" {
+			for _, res := range urlSvcIps {
+				typ := "AAAA"
+				if res.To4() != nil {
+					typ = "A"
+				}
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     typ,
+					content: res.String(),
+				})
+			}
+		} else {
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     rec.Type,
+				content: rec.Content,
+			})
 		}
 
-		// Assemble RFC 1035 conforming record to pass into DNS scanner.
-		rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, rec.Type, rec.Content)
-		rr, err := dns.NewRR(rfc1035)
-		if err != nil {
-			return fmt.Errorf("failed to parse resource record: %v", err)
-		}
+		for _, raw := range rawRecords {
+			// Assemble RFC 1035 conforming record to pass into DNS scanner.
+			rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, raw.typ, raw.content)
+			rr, err := dns.NewRR(rfc1035)
+			if err != nil {
+				return fmt.Errorf("failed to parse resource record: %v", err)
+			}
 
-		log.Debugf("inserting record %s", rfc1035)
-		zone.Insert(rr)
+			log.Debugf("inserting record %s", rfc1035)
+			zone.Insert(rr)
+		}
 	}
 	return nil
 }
@@ -232,6 +290,12 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
 	errc := make(chan error)
 	defer close(errc)
+
+	urlSvcIps, err := net.LookupIP("coredns-url-record-target.dns.solutions")
+	if err != nil {
+		errc <- fmt.Errorf("failed to fetch URL record target: %v", err)
+	}
+
 	for zoneName, z := range h.zones {
 		go func(zoneName string, z []*zone) {
 			var err error
@@ -255,7 +319,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				newZone.Upstream = h.upstream
 				newPools := make(map[string][]string, 16)
 
-				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, newZone); err != nil {
+				if err := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone, h.dnsResolver); err != nil {
 					// Maybe unsupported record type. Log and carry on.
 					log.Warningf("failed to process resource records: %v", err)
 				}
