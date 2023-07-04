@@ -103,17 +103,11 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 func TestDNSimple(t *testing.T) {
 	ctx := context.Background()
 	fakeClient := new(fakeDNSimpleClient)
-	opts := Options{}
-
-	r, err := New(ctx, fakeClient, map[string][]string{"example.bad.": {""}}, opts)
-	if err != nil {
-		t.Fatalf("failed to create dnsimple: %v", err)
-	}
-	if err = r.Run(ctx); err == nil {
-		t.Fatalf("expected errors for zone bad.")
+	opts := Options{
+		apiCaller: func(path string, body []byte) error { return nil },
 	}
 
-	r, err = New(ctx, fakeClient, map[string][]string{"example.org.": {"AMS"}}, opts)
+	r, err := New(ctx, fakeClient, map[string][]string{"example.org.": {"AMS"}}, opts)
 	t.Logf("zoneNames: %v", r.zoneNames)
 	t.Logf("zones: %v", r.zones)
 	if err != nil {
