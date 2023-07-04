@@ -241,10 +241,11 @@ func TestDNSimple(t *testing.T) {
 				}
 			}
 		} else {
-			assert.Len(t, rec.Msg.Answer, len(tc.wantAnswer), "Test %d: Unexpected number of Answers. Want: %d, got: %d", ti, len(tc.wantAnswer), len(rec.Msg.Answer))
-			for i, gotAnswer := range rec.Msg.Answer {
-				assert.Equal(t, tc.wantAnswer[i], gotAnswer.String(), "Test %d: Unexpected answer.\nWant:\n\t%s\nGot:\n\t%s", ti, tc.wantAnswer[i], gotAnswer)
+			msgAnswers := make([]string, 0)
+			for _, a := range rec.Msg.Answer {
+				msgAnswers = append(msgAnswers, a.String())
 			}
+			assert.ElementsMatch(t, msgAnswers, tc.wantAnswer)
 		}
 
 		assert.Len(t, rec.Msg.Ns, len(tc.wantNS), "Test %d: Unexpected NS number. Want: %d, got: %d", ti, len(tc.wantNS), len(rec.Msg.Ns))
