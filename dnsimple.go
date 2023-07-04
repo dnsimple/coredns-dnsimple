@@ -392,8 +392,8 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 	for zoneName, z := range h.zones {
 		wg.Add(1)
-		defer wg.Done()
 		go func(zoneName string, z []*zone) {
+			defer wg.Done()
 			var zoneError error = nil
 
 			var zoneRecords []dnsimple.ZoneRecord
@@ -401,11 +401,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 			options := &dnsimple.ZoneRecordListOptions{}
 			options.PerPage = dnsimple.Int(100)
 
-			zoneRecords, err := h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
-			if err != nil {
-				err = fmt.Errorf("failed to list resource records for %v from dnsimple: %v", zoneName, err)
-				return
-			}
+			zoneRecords, zoneError = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
 
 			errorByRecordId := make(map[int64]updateZoneRecordFailure)
 			if zoneError == nil {
