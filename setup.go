@@ -15,12 +15,29 @@ import (
 	"github.com/coredns/coredns/plugin/pkg/fall"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/dnsimple/dnsimple-go/dnsimple"
-	"golang.org/x/oauth2"
 )
 
 var log = clog.NewWithPlugin("dnsimple")
 
 func init() { plugin.Register("dnsimple", setup) }
+
+const defaultUserAgent = "coredns-plugin-dnsimple"
+
+type Options struct {
+	accountId   string
+	apiCaller DNSimpleApiCaller
+	identifier  string
+	maxRetries  int
+	refresh     time.Duration
+}
+
+// exposed for testing
+var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl string) (dnsimpleService, error) {
+	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, accessToken))
+	client.BaseURL = baseUrl
+	client.SetUserAgent(defaultUserAgent)
+	return dnsimpleClient{client}, nil
+}
 
 func setup(c *caddy.Controller) error {
 	rand.Seed(time.Now().UTC().UnixNano())
@@ -29,10 +46,10 @@ func setup(c *caddy.Controller) error {
 		keyPairs := map[string]struct{}{}
 		keys := map[string][]string{}
 
+		opts := Options{}
+		var accessToken string
+		var baseUrl string
 		var fall fall.F
-
-		// Default update frequency of 1 minute.
-		refresh := time.Duration(1) * time.Minute
 
 		args := c.RemainingArgs()
 
@@ -56,17 +73,10 @@ func setup(c *caddy.Controller) error {
 			keys[dns] = append(keys[dns], hostedZoneRegion)
 		}
 
+		// TODO: set to warn when no zones are defined
 		if len(keys) == 0 {
 			return plugin.Error("dnsimple", c.Errf("no zone(s) specified"))
 		}
-
-		var (
-			accessToken string
-			accountId   string
-			identifier  string
-			maxRetries  int = 3
-			sandbox     bool
-		)
 
 		for c.NextBlock() {
 			switch c.Val() {
@@ -82,24 +92,24 @@ func setup(c *caddy.Controller) error {
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				accountId = c.Val()
+				opts.accountId = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
 			case "identifier":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				identifier = c.Val()
+				opts.identifier = c.Val()
 			case "max_retries":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
 				maxRetriesStr := c.Val()
 				var err error
-				if maxRetries, err = strconv.Atoi(maxRetriesStr); err != nil {
+				if opts.maxRetries, err = strconv.Atoi(maxRetriesStr); err != nil {
 					return plugin.Error("dnsimple", c.Errf("unable to parse max retries: %v", err))
 				}
-				if maxRetries < 0 {
+				if opts.maxRetries < 0 {
 					return plugin.Error("dnsimple", c.Err("max retries cannot be less than zero"))
 				}
 			case "refresh":
@@ -111,48 +121,55 @@ func setup(c *caddy.Controller) error {
 				if _, err = strconv.Atoi(refreshStr); err == nil {
 					refreshStr = fmt.Sprintf("%ss", c.Val())
 				}
-				if refresh, err = time.ParseDuration(refreshStr); err != nil {
+				if opts.refresh, err = time.ParseDuration(refreshStr); err != nil {
 					return plugin.Error("dnsimple", c.Errf("unable to parse duration: %v", err))
 				}
-				if refresh <= 60 {
+				if opts.refresh <= 60 {
 					return plugin.Error("dnsimple", c.Errf("refresh interval must be greater than 60 seconds: %q", refreshStr))
 				}
-			case "sandbox":
+			case "base_url":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				sandbox, _ = strconv.ParseBool(c.Val())
+				baseUrl = c.Val()
 			default:
 				return plugin.Error("dnsimple", c.Errf("unknown property %q", c.Val()))
 			}
 		}
 
+		// Set default values.
 		if accessToken == "" {
 			// Keep this environment variable name consistent across all our integrations (e.g. SDKs, Terraform provider).
 			accessToken = os.Getenv("DNSIMPLE_TOKEN")
 		}
 
-		if accountId == "" {
-			accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
+		if baseUrl == "" {
+			// Default to production
+			baseUrl = "https://api.dnsimple.com"
 		}
 
-		if identifier == "" {
-			identifier = "default"
+		if opts.accountId == "" {
+			opts.accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
 		}
 
-		// TODO This overrides `sandbox false` in the config if "true" but ignores `DNSIMPLE_SANDBOX=false` if `sandbox true`, so the priority behaviour is inconsistent.
-		if !sandbox && os.Getenv("DNSIMPLE_SANDBOX") == "true" {
-			sandbox = true
+		if opts.identifier == "" {
+			opts.identifier = "default"
 		}
+
+		if opts.refresh < 60 {
+			// Default update frequency of 1 minute.
+			opts.refresh = time.Duration(1) * time.Minute
+		}
+
+		opts.apiCaller = createDNSimpleApiCaller(baseUrl, accessToken, defaultUserAgent)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client := dnsimple.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})))
-		client.SetUserAgent("coredns-plugin-dnsimple")
-		if sandbox {
-			client.BaseURL = "https://api.sandbox.dnsimple.com"
+		client, err := newDnsimpleService(ctx, accessToken, baseUrl)
+		if err != nil {
+			cancel()
+			return err
 		}
-
-		h, err := New(ctx, accountId, accessToken, DefaultDNSimpleApiCaller, client, identifier, keys, refresh, maxRetries)
+		h, err := New(ctx, client, keys, opts)
 		if err != nil {
 			cancel()
 			return plugin.Error("dnsimple", c.Errf("failed to create dnsimple plugin: %v", err))

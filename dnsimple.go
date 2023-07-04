@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -38,30 +37,32 @@ func retryable(maxRetries int, cb func() error) error {
 	return nil
 }
 
-type DNSimpleApiCaller func(baseUrl string, path string, accessToken string, userAgent string, body []byte) error
+type DNSimpleApiCaller func(path string, body []byte) error
 
-func DefaultDNSimpleApiCaller(baseUrl string, path string, accessToken string, userAgent string, body []byte) error {
-	url := fmt.Sprintf("%s%s", baseUrl, path)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("user-agent", userAgent)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode >= 300 {
-		body, err := io.ReadAll(res.Body)
-		if err == nil {
-			return fmt.Errorf("bad status code of %d: %s", res.StatusCode, string(body))
+func createDNSimpleApiCaller(baseUrl string, accessToken string, userAgent string) DNSimpleApiCaller {
+	return func(path string, body []byte) error {
+		url := fmt.Sprintf("%s%s", baseUrl, path)
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("bad status code of %d (response could not be read)", res.StatusCode)
+		req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
+		req.Header.Set("content-type", "application/json")
+		req.Header.Set("user-agent", userAgent)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+		if res.StatusCode >= 300 {
+			body, err := io.ReadAll(res.Body)
+			if err == nil {
+				return fmt.Errorf("bad status code of %d: %s", res.StatusCode, string(body))
+			}
+			return fmt.Errorf("bad status code of %d (response could not be read)", res.StatusCode)
+		}
+		return nil
 	}
-	return nil
 }
 
 // DNSimple is a plugin that returns RR from DNSimple.
@@ -71,9 +72,8 @@ type DNSimple struct {
 
 	// Each zone name contains a trailing dot.
 	zoneNames   []string
-	client      *dnsimple.Client
+	client     dnsimpleService
 	accountId   string
-	accessToken string
 	apiCaller   DNSimpleApiCaller
 	identifier  string
 	upstream    *upstream.Upstream
@@ -95,14 +95,14 @@ type zone struct {
 
 type zones map[string][]*zone
 
-func New(ctx context.Context, accountId string, accessToken string, apiCaller DNSimpleApiCaller, client *dnsimple.Client, identifier string, keys map[string][]string, refresh time.Duration, maxRetries int) (*DNSimple, error) {
+func New(ctx context.Context, client dnsimpleService, keys map[string][]string, opts Options) (*DNSimple, error) {
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
 	for zoneName, hostedZoneRegions := range keys {
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		res, err := client.Zones.GetZone(ctx, accountId, strings.TrimSuffix(zoneName, "."))
+		res, err := client.getZone(ctx, opts.accountId, zoneName)
 		if err != nil {
 			return nil, err
 		}
@@ -110,20 +110,19 @@ func New(ctx context.Context, accountId string, accessToken string, apiCaller DN
 			zoneNames = append(zoneNames, zoneName)
 		}
 		for _, hostedZoneRegion := range hostedZoneRegions {
-			zones[zoneName] = append(zones[zoneName], &zone{id: res.Data.ID, name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
+			zones[zoneName] = append(zones[zoneName], &zone{id: res.ID, name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
 		}
 	}
 	return &DNSimple{
-		accessToken: accessToken,
-		accountId:   accountId,
-		apiCaller:   apiCaller,
-		client:      client,
-		identifier:  identifier,
-		maxRetries:  maxRetries,
-		refresh:     refresh,
-		upstream:    upstream.New(),
-		zoneNames:   zoneNames,
-		zones:       zones,
+		accountId:  opts.accountId,
+		apiCaller:   opts.apiCaller,
+		client:     client,
+		identifier: opts.identifier,
+		maxRetries: opts.maxRetries,
+		refresh:    opts.refresh,
+		upstream:   upstream.New(),
+		zoneNames:  zoneNames,
+		zones:      zones,
 	}, nil
 }
 
@@ -153,10 +152,7 @@ func (h *DNSimple) Run(ctx context.Context) error {
 
 func (h *DNSimple) callApi(path string, body []byte) error {
 	return h.apiCaller(
-		h.client.BaseURL,
 		path,
-		h.accessToken,
-		h.client.UserAgent,
 		body,
 	)
 }
@@ -332,29 +328,15 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 		go func(zoneName string, z []*zone) {
 			var zoneError error = nil
 
-			// zoneRecords stores the complete set of zone records
 			var zoneRecords []dnsimple.ZoneRecord
 
 			options := &dnsimple.ZoneRecordListOptions{}
 			options.PerPage = dnsimple.Int(100)
 
-			// Fetch all records for the zone.
-			for {
-				var response *dnsimple.ZoneRecordsResponse
-				zoneError = retryable(h.maxRetries, func() (listErr error) {
-					// Our API does not expect the zone name to end with a dot.
-					response, listErr = h.client.Zones.ListRecords(ctx, h.accountId, strings.TrimSuffix(zoneName, "."), options)
-					return
-				})
-				if zoneError != nil {
-					log.Errorf("failed to list records: %v", zoneError)
-					break
-				}
-				zoneRecords = append(zoneRecords, response.Data...)
-				if response.Pagination.CurrentPage >= response.Pagination.TotalPages {
-					break
-				}
-				options.Page = dnsimple.Int(response.Pagination.CurrentPage + 1)
+			zoneRecords, err := h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
+			if err != nil {
+				err = fmt.Errorf("failed to list resource records for %v from dnsimple: %v", zoneName, err)
+				return
 			}
 
 			errorByRecordId := make(map[int64]updateZoneRecordFailure)
