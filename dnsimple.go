@@ -274,6 +274,7 @@ type updateZoneStatusRequest struct {
 	Resource string                  `json:"resource"`
 	State    string                  `json:"state"`
 	Title    string                  `json:"title"`
+	Message  string                  `json:"message"`
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
@@ -446,6 +447,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				Resource: fmt.Sprintf("zone:%d", z[0].id),
 				State:    state,
 				Title:    fmt.Sprintf("CoreDNS %s %s", h.identifier, state),
+				Message:  zoneErrorMessage,
 				Data: updateZoneStatusMessage{
 					Time:              time.Now().UTC().Format(time.RFC3339),
 					CorednsIdentifier: h.identifier,
