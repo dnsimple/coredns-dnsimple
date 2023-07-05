@@ -72,38 +72,27 @@ type DNSimple struct {
 	Fall fall.F
 	Next plugin.Handler
 
-	accountId  string
-	client     dnsimpleService
-	identifier string
-	lock       sync.RWMutex
-	maxRetries int
-	refresh    time.Duration
-	upstream   *upstream.Upstream
-	zoneNames  []string // set using the zone object fqdn
-	zones      zones
-}
-
-type zone struct {
-	fqdn string // fqdn containing the trailing dot
-	// Each zone name contains a trailing dot.
+	accountId   string
+	client      dnsimpleService
+	identifier  string
+	lock        sync.RWMutex
+	maxRetries  int
+	refresh     time.Duration
+	upstream    *upstream.Upstream
+	zoneNames   []string // set using the zone object fqdn
+	zones       zones
 	dnsResolver *net.Resolver
 	apiCaller   DNSimpleApiCaller
-	accountId   string
-	upstream    *upstream.Upstream
-	refresh     time.Duration
-	maxRetries  int
-
-	lock  sync.RWMutex
-	zones zones
 }
 
 type zone struct {
-	id int64
-	// This contains the trailing dot.
+	id     int64
+	fqdn   string // fqdn containing the trailing dot
 	name   string
 	pools  map[string][]string
 	region string
-	zone   *file.Zone
+
+	zone *file.Zone
 }
 
 type zones map[string][]*zone
@@ -118,7 +107,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		_, err := client.getZone(ctx, opts.accountId, name)
+		res, err := client.getZone(ctx, opts.accountId, name)
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +115,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 			zoneNames = append(zoneNames, fqdn)
 		}
 		for _, region := range regions {
-			zones[fqdn] = append(zones[fqdn], &zone{fqdn: fqdn, name: name, region: region, zone: file.NewZone(fqdn, "")})
+			zones[fqdn] = append(zones[fqdn], &zone{id: res.ID, fqdn: fqdn, name: name, region: region, zone: file.NewZone(fqdn, "")})
 		}
 	}
 	dnsResolver := net.DefaultResolver
@@ -414,10 +403,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			var zoneRecords []dnsimple.ZoneRecord
 
-			options := &dnsimple.ZoneRecordListOptions{}
-			options.PerPage = dnsimple.Int(100)
-
-			zoneRecords, zoneError = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
+			zoneRecords, zoneError = h.client.listZoneRecords(ctx, h.accountId, zoneName, h.maxRetries)
 
 			errorByRecordId := make(map[int64]updateZoneRecordFailure)
 			if zoneError == nil {

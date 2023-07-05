@@ -25,6 +25,7 @@ const defaultUserAgent = "coredns-plugin-dnsimple"
 
 type Options struct {
 	accountId         string
+	accessToken       string
 	apiCaller         DNSimpleApiCaller
 	customDnsResolver string
 	identifier        string

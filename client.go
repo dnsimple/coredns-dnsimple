@@ -30,7 +30,7 @@ func (c dnsimpleClient) getZone(ctx context.Context, accountID string, zoneName 
 
 // listZoneRecords is a wrapper for `dnsimple.Client.Zones.ListRecords`.
 // It fetches and returns all record sets for a zone handling pagination.
-func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
+func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error) {
 	var rs []dnsimple.ZoneRecord
 
 	listOptions := &dnsimple.ZoneRecordListOptions{}
@@ -41,7 +41,7 @@ func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, z
 		var response *dnsimple.ZoneRecordsResponse
 		listErr := retryable(maxRetries, func() (listErr error) {
 			// Our API does not expect the zone name to end with a dot.
-			response, listErr = c.Zones.ListRecords(ctx, accountID, strings.TrimSuffix(zoneName, "."), options)
+			response, listErr = c.Zones.ListRecords(ctx, accountID, strings.TrimSuffix(zoneName, "."), listOptions)
 			return
 		})
 		if listErr != nil {
