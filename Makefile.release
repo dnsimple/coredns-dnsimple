@@ -1,0 +1,46 @@
+ifeq (, $(shell which curl))
+    $(error "No curl in $$PATH, please install")
+endif
+
+NAME:=coredns
+VERSION:=$(shell grep 'CoreVersion' coremain/version.go | awk '{ print $$3 }' | tr -d '"')
+GITCOMMIT:=$(shell git describe --dirty --always)
+LINUX_ARCH:=amd64 arm arm64
+
+release: build tar
+
+.PHONY: build
+build:
+	@rm -rf build && mkdir build
+	@echo "Building: darwin/amd64 - $(VERSION)"
+	@mkdir -p build/darwin/amd64
+	@GOOS=darwin GOARCH=amd64 go build -o build/darwin/amd64/$(NAME) -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$(GITCOMMIT)"
+	@echo "Building: darwin/arm64 - $(VERSION)"
+	@mkdir -p build/darwin/arm64
+	@GOOS=darwin GOARCH=arm64 go build -o build/darwin/arm64/$(NAME) -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$(GITCOMMIT)"
+	@echo "Building: windows/amd64 - $(VERSION)"
+	@mkdir -p build/windows/amd64
+	@GOOS=windows GOARCH=amd64 go build -o build/windows/amd64/$(NAME).exe -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$(GITCOMMIT)"
+	@echo Building: linux/$(LINUX_ARCH) - $(VERSION) ;\
+	for arch in $(LINUX_ARCH); do \
+		mkdir -p build/linux/$$arch && GOOS=linux GOARCH=$$arch go build -o build/linux/$$arch/$(NAME) -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$(GITCOMMIT)" ;\
+	done
+
+.PHONY: tar
+tar:
+	@rm -rf release && mkdir release
+	tar -zcf release/$(NAME)_$(VERSION)_darwin_amd64.tar.gz -C build/darwin/amd64 $(NAME)
+	tar -zcf release/$(NAME)_$(VERSION)_darwin_arm64.tar.gz -C build/darwin/arm64 $(NAME)
+	tar -zcf release/$(NAME)_$(VERSION)_windows_amd64.tar.gz -C build/windows/amd64 $(NAME).exe
+	for arch in $(LINUX_ARCH); do \
+		tar -zcf release/$(NAME)_$(VERSION)_linux_$$arch.tar.gz -C build/linux/$$arch $(NAME) ;\
+	done
+
+.PHONY: version
+version:
+	@echo $(VERSION)
+
+.PHONY: clean
+clean:
+	rm -rf release
+	rm -rf build
