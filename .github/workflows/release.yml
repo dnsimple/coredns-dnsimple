@@ -32,7 +32,7 @@ jobs:
       - name: Build CoreDNS with DNSimple Plugin
         run: |
           pluginDir="$PWD"
-          git clone https://github.com/coredns/coredns .
+          git clone https://github.com/coredns/coredns
           pushd coredns
           sed -i "s%^go ${{ env.GO_VERSION }}%go ${{ env.GO_VERSION }}\nreplace github.com/dnsimple/coredns-dnsimple => $pluginDir%" go.mod
           sed -i 's%route53:route53%dnsimple:github.com/dnsimple/coredns-dnsimple%' plugin.cfg
