@@ -434,9 +434,13 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			state := "ok"
 			zoneErrorMessage := ""
-			if zoneError != nil || len(failedRecords) > 0 {
+			if zoneError != nil {
 				state = "error"
 				zoneErrorMessage = zoneError.Error()
+			}
+			if len(failedRecords) > 0 {
+				state = "error"
+				zoneErrorMessage = "Failure when synching zone records"
 			}
 			status := updateZoneStatusRequest{
 				Resource: fmt.Sprintf("zone:%d", z[0].id),
