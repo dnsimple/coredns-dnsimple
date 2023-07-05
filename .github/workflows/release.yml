@@ -40,10 +40,11 @@ jobs:
           sed -i 's%route53:route53%dnsimple:github.com/dnsimple/coredns-dnsimple%' plugin.cfg
           GOFLAGS=-mod=mod go generate
           go mod tidy
-          go build
+          cp ../Makefile.release .
+          make release -f Makefile.release
           popd
 
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: coredns/coredns
+          files: release/*.tar.gz
