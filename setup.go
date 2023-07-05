@@ -21,20 +21,22 @@ var log = clog.NewWithPlugin("dnsimple")
 
 func init() { plugin.Register("dnsimple", setup) }
 
+const defaultUserAgent = "coredns-plugin-dnsimple"
+
 type Options struct {
-	accessToken string
-	accountId   string
-	baseUrl     string
-	identifier  string
-	maxRetries  int
-	refresh     time.Duration
+	accountId         string
+	apiCaller         DNSimpleApiCaller
+	customDnsResolver string
+	identifier        string
+	maxRetries        int
+	refresh           time.Duration
 }
 
 // exposed for testing
-var newDnsimpleService = func(ctx context.Context, opts Options) (dnsimpleService, error) {
-	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, opts.accessToken))
-	client.BaseURL = opts.baseUrl
-	client.SetUserAgent("coredns-plugin-dnsimple")
+var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl string) (dnsimpleService, error) {
+	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, accessToken))
+	client.BaseURL = baseUrl
+	client.SetUserAgent(defaultUserAgent)
 	return dnsimpleClient{client}, nil
 }
 
@@ -46,6 +48,8 @@ func setup(c *caddy.Controller) error {
 		keys := map[string][]string{}
 
 		opts := Options{}
+		var accessToken string
+		var baseUrl string
 		var fall fall.F
 
 		args := c.RemainingArgs()
@@ -90,6 +94,11 @@ func setup(c *caddy.Controller) error {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
 				opts.accountId = c.Val()
+			case "custom_dns_resolver":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				opts.customDnsResolver = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
 			case "identifier":
@@ -128,16 +137,21 @@ func setup(c *caddy.Controller) error {
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				opts.baseUrl = c.Val()
+				baseUrl = c.Val()
 			default:
 				return plugin.Error("dnsimple", c.Errf("unknown property %q", c.Val()))
 			}
 		}
 
 		// Set default values.
-		if opts.accessToken == "" {
+		if accessToken == "" {
 			// Keep this environment variable name consistent across all our integrations (e.g. SDKs, Terraform provider).
-			opts.accessToken = os.Getenv("DNSIMPLE_TOKEN")
+			accessToken = os.Getenv("DNSIMPLE_TOKEN")
+		}
+
+		if baseUrl == "" {
+			// Default to production
+			baseUrl = "https://api.dnsimple.com"
 		}
 
 		if opts.accountId == "" {
@@ -153,13 +167,10 @@ func setup(c *caddy.Controller) error {
 			opts.refresh = time.Duration(1) * time.Minute
 		}
 
-		if opts.baseUrl == "" {
-			// Default to production
-			opts.baseUrl = "https://api.dnsimple.com"
-		}
+		opts.apiCaller = createDNSimpleApiCaller(baseUrl, accessToken, defaultUserAgent)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client, err := newDnsimpleService(ctx, opts)
+		client, err := newDnsimpleService(ctx, accessToken, baseUrl)
 		if err != nil {
 			cancel()
 			return err

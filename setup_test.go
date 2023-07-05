@@ -10,7 +10,7 @@ import (
 
 func TestSetupDNSimple(t *testing.T) {
 	fakeClient := new(fakeDNSimpleClient)
-	newDnsimpleService = func(ctx context.Context, opt Options) (dnsimpleService, error) {
+	newDnsimpleService = func(ctx context.Context, accessToken, baseUrl string) (dnsimpleService, error) {
 		return fakeClient, nil
 	}
 
@@ -25,28 +25,28 @@ func TestSetupDNSimple(t *testing.T) {
 		{`dnsimple example.org:`, false},
 		{`dnsimple example.org.`, false},
 		{`dnsimple example.org:AMS { }`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			access_token
 		}`, true},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			account_id 12345
 		}`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			base_url https://api.dnsimple.com/
 		}`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			identifier example
 		}`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			max_retries 10
 		}`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			refresh 1h
 		}`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			refresh 2s
 		}`, false},
-		{`dnsimple example.org { 
+		{`dnsimple example.org {
 			wat
 		}`, true},
 	}
