@@ -6,7 +6,7 @@ on:
       - v*.*.*
 
 env:
-  GO_VERSION: 1.20
+  GO_VERSION: '1.20'
 
 jobs:
   publish:
@@ -37,7 +37,6 @@ jobs:
           pushd coredns
           echo "sed -i \"s%^go ${{env.GO_VERSION}}%go ${{env.GO_VERSION}}\nreplace github.com/dnsimple/coredns-dnsimple => $pluginDir%\" go.mod"
           sed -i "s%^go ${{env.GO_VERSION}}%go ${{env.GO_VERSION}}\nreplace github.com/dnsimple/coredns-dnsimple => $pluginDir%" go.mod
-          cat go.mod
           sed -i 's%route53:route53%dnsimple:github.com/dnsimple/coredns-dnsimple%' plugin.cfg
           GOFLAGS=-mod=mod go generate
           go mod tidy
