@@ -68,6 +68,13 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 			Regions: []string{"CDG"},
 		},
 		{
+			Name:    "naptr",
+			Type:    "NAPTR",
+			Content: "100 10 S SIP+D2U !^.*$!sip:customer-service@example.com! _sip._udp.example.com.",
+			TTL:     300,
+			Regions: []string{"global"},
+		},
+		{
 			Name:    "pool",
 			Type:    "POOL",
 			Content: "a.pool.example.com",
@@ -187,7 +194,15 @@ func TestDNSimple(t *testing.T) {
 			wantMsgRCode: dns.RcodeNameError,
 			wantNS:       []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
 		},
-		// 5. POOL record.
+		// 5. NAPTR.
+		{
+			qname: "naptr.example.org",
+			qtype: dns.TypeNAPTR,
+			wantAnswer: []string{
+				"naptr.example.org.	300	IN	NAPTR	100 10 \"S\" \"SIP+D2U\" \"!^.*$!sip:customer-service@example.com!\" _sip._udp.example.com.",
+			},
+		},
+		// 6. POOL record.
 		{
 			qname:       "pool.example.org",
 			qtype:       dns.TypeCNAME,
@@ -197,7 +212,7 @@ func TestDNSimple(t *testing.T) {
 				"pool.example.org.	300	IN	CNAME	b.pool.example.com.",
 			},
 		},
-		// 6. URL record.
+		// 7. URL record.
 		{
 			qname: "url.example.org",
 			qtype: dns.TypeA,

@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -320,6 +321,20 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				typ:     "MX",
 				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
 			})
+		} else if rec.Type == "NAPTR" {
+			// NAPTR record content should be properly quoted.
+			parts := strings.Split(rec.Content, " ")
+			if len(parts) < 6 {
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     "NAPTR",
+					content: fmt.Sprintf(`%s %s "%s" "%s" "" %s`, parts[0], parts[1], parts[2], parts[3], parts[4]),
+				})
+			} else {
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     "NAPTR",
+					content: fmt.Sprintf(`%s %s "%s" "%s" "%s" %s`, parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]),
+				})
+			}
 		} else if rec.Type == "POOL" {
 			isFirst := false
 			if pools[fqdn] == nil {
@@ -359,6 +374,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			rr, err := dns.NewRR(rfc1035)
 			if err != nil {
 				log.Errorf("failed to parse resource record: %v", err)
+				log.Errorf("resource record content: %s", rfc1035)
 				failures = append(failures, updateZoneRecordFailure{
 					Record: rec,
 					Error:  fmt.Sprintf("failed to parse resource record: %v", err),
