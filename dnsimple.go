@@ -3,7 +3,6 @@ package dnsimple
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
@@ -168,13 +167,6 @@ func (h *DNSimple) Run(ctx context.Context) error {
 	return nil
 }
 
-func (h *DNSimple) callApi(path string, body []byte) error {
-	return h.apiCaller(
-		path,
-		body,
-	)
-}
-
 // ServeDNS implements the plugin.Handler.ServeDNS.
 func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
@@ -200,7 +192,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		maybeInterceptPoolResponse(regionalZone, &msg.Answer)
 
 		// Take the answer if it's non-empty OR if there is another
-		// record type exists for this name (NODATA).
+		// record type that exists for this name (NODATA).
 		if len(msg.Answer) != 0 || result == file.NoData {
 			break
 		}
@@ -455,19 +447,9 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					FailedRecords:     failedRecords,
 				},
 			}
-			statusJson, err := json.Marshal(status)
+			err := h.client.updateZoneStatus(h.accountId, h.apiCaller, h.maxRetries, status)
 			if err != nil {
-				panic(fmt.Errorf("failed to serialise status request: %v", err))
-			}
-			sendStatusError := retryable(h.maxRetries, func() (err error) {
-				err = h.callApi(
-					fmt.Sprintf("/v2/%s/platform/statuses", h.accountId),
-					statusJson,
-				)
-				return
-			})
-			if sendStatusError != nil {
-				log.Errorf("failed to send status: %v", sendStatusError)
+				log.Errorf("failed to update zone status: %v", err)
 			}
 		}(zoneName, z)
 	}

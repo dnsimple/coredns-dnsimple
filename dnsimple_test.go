@@ -100,6 +100,10 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 	return fakeZoneRecords, nil
 }
 
+func (m *fakeDNSimpleClient) updateZoneStatus(accountID string, apiCaller DNSimpleApiCaller, maxRetries int, status updateZoneStatusRequest) (err error) {
+	return nil
+}
+
 func TestDNSimple(t *testing.T) {
 	ctx := context.Background()
 	fakeClient := new(fakeDNSimpleClient)

@@ -2,6 +2,8 @@ package dnsimple
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/dnsimple/dnsimple-go/dnsimple"
@@ -16,6 +18,7 @@ type dnsimpleClient struct {
 type dnsimpleService interface {
 	getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error)
 	listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error)
+	updateZoneStatus(accountID string, apiCaller DNSimpleApiCaller, maxRetries int, status updateZoneStatusRequest) (err error)
 }
 
 // getZone is a wrapper method around `dnsimple.Client.Zones.GetZone`
@@ -55,4 +58,22 @@ func (c dnsimpleClient) listZoneRecords(ctx context.Context, accountID string, z
 	}
 
 	return rs, nil
+}
+
+func (c dnsimpleClient) updateZoneStatus(accountID string, apiCaller DNSimpleApiCaller, maxRetries int, status updateZoneStatusRequest) (err error) {
+	statusJson, err := json.Marshal(status)
+	if err != nil {
+		panic(fmt.Errorf("failed to serialise status request: %v", err))
+	}
+	sendStatusError := retryable(maxRetries, func() (err error) {
+		err = apiCaller(
+			fmt.Sprintf("/v2/%s/platform/statuses", accountID),
+			statusJson,
+		)
+		return
+	})
+	if sendStatusError != nil {
+		return sendStatusError
+	}
+	return nil
 }
