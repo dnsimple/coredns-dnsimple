@@ -82,6 +82,14 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 			Regions: []string{"global"},
 		},
 		{
+			Name:     "srv",
+			Type:     "SRV",
+			Content:  "5 5060 sipserver.example.com",
+			Priority: 0,
+			TTL:      300,
+			Regions:  []string{"global"},
+		},
+		{
 			Name:    "url",
 			Type:    "URL",
 			Content: "https://example.org",
@@ -201,7 +209,15 @@ func TestDNSimple(t *testing.T) {
 				"pool.example.org.	300	IN	CNAME	b.pool.example.com.",
 			},
 		},
-		// 6. URL record.
+		// 6. SRV record.
+		{
+			qname: "srv.example.org",
+			qtype: dns.TypeSRV,
+			wantAnswer: []string{
+				"srv.example.org.	300	IN	SRV	0 5 5060 sipserver.example.com.",
+			},
+		},
+		// 7. URL record.
 		{
 			qname: "url.example.org",
 			qtype: dns.TypeA,

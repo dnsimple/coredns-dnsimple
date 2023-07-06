@@ -333,6 +333,12 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				typ:     "CNAME",
 				content: rec.Content,
 			})
+		} else if rec.Type == "SRV" {
+			// SRV records have a priority and a content field.
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "SRV",
+				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
+			})
 		} else if rec.Type == "URL" {
 			for _, res := range urlSvcIps {
 				typ := "AAAA"
