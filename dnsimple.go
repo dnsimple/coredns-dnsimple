@@ -3,12 +3,12 @@ package dnsimple
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,31 +68,30 @@ func createDNSimpleApiCaller(baseUrl string, accessToken string, userAgent strin
 
 // DNSimple is a plugin that returns RR from DNSimple.
 type DNSimple struct {
-	Next plugin.Handler
 	Fall fall.F
+	Next plugin.Handler
 
-	// Each zone name contains a trailing dot.
-	zoneNames   []string
+	accountId   string
 	client      dnsimpleService
+	identifier  string
+	lock        sync.RWMutex
+	maxRetries  int
+	refresh     time.Duration
+	upstream    *upstream.Upstream
+	zoneNames   []string // set using the zone object fqdn
+	zones       zones
 	dnsResolver *net.Resolver
 	apiCaller   DNSimpleApiCaller
-	accountId   string
-	identifier  string
-	upstream    *upstream.Upstream
-	refresh     time.Duration
-	maxRetries  int
-
-	lock  sync.RWMutex
-	zones zones
 }
 
 type zone struct {
-	id int64
-	// This contains the trailing dot.
+	id     int64
+	fqdn   string // fqdn containing the trailing dot
 	name   string
 	pools  map[string][]string
 	region string
-	zone   *file.Zone
+
+	zone *file.Zone
 }
 
 type zones map[string][]*zone
@@ -101,18 +100,21 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 	zones := make(map[string][]*zone, len(keys))
 	zoneNames := make([]string, 0, len(keys))
 
-	for zoneName, hostedZoneRegions := range keys {
+	for fqdn, regions := range keys {
+		fqdn = dns.Fqdn(fqdn)
+		name := strings.TrimSuffix(fqdn, ".")
+
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		res, err := client.getZone(ctx, opts.accountId, zoneName)
+		res, err := client.getZone(ctx, opts.accountId, name)
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := zones[zoneName]; !ok {
-			zoneNames = append(zoneNames, zoneName)
+		if _, ok := zones[fqdn]; !ok {
+			zoneNames = append(zoneNames, fqdn)
 		}
-		for _, hostedZoneRegion := range hostedZoneRegions {
-			zones[zoneName] = append(zones[zoneName], &zone{id: res.ID, name: zoneName, region: hostedZoneRegion, zone: file.NewZone(zoneName, "")})
+		for _, region := range regions {
+			zones[fqdn] = append(zones[fqdn], &zone{id: res.ID, fqdn: fqdn, name: name, region: region, zone: file.NewZone(fqdn, "")})
 		}
 	}
 	dnsResolver := net.DefaultResolver
@@ -165,13 +167,6 @@ func (h *DNSimple) Run(ctx context.Context) error {
 	return nil
 }
 
-func (h *DNSimple) callApi(path string, body []byte) error {
-	return h.apiCaller(
-		path,
-		body,
-	)
-}
-
 // ServeDNS implements the plugin.Handler.ServeDNS.
 func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
@@ -197,7 +192,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		maybeInterceptPoolResponse(regionalZone, &msg.Answer)
 
 		// Take the answer if it's non-empty OR if there is another
-		// record type exists for this name (NODATA).
+		// record type that exists for this name (NODATA).
 		if len(msg.Answer) != 0 || result == file.NoData {
 			break
 		}
@@ -271,6 +266,7 @@ type updateZoneStatusRequest struct {
 	Resource string                  `json:"resource"`
 	State    string                  `json:"state"`
 	Title    string                  `json:"title"`
+	Message  string                  `json:"message"`
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
@@ -328,7 +324,9 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			}
 			pools[fqdn] = append(pools[fqdn], rec.Content)
 			if !isFirst {
-				// We have already inserted a record for this POOL name, there's no point to adding more. As an interesting side note, the file plugin does not crash on multiple CNAME records with the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
+				// We have already inserted a record for this POOL name, there's no point to adding more.
+				// As an interesting side note, the file plugin does not crash on multiple CNAME records with
+				// the same name, and will simply respond with all CNAMEs if matched, which doesn't appear to be spec compliant.
 				continue
 			}
 			rawRecords = append(rawRecords, rawRecord{
@@ -404,10 +402,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			var zoneRecords []dnsimple.ZoneRecord
 
-			options := &dnsimple.ZoneRecordListOptions{}
-			options.PerPage = dnsimple.Int(100)
-
-			zoneRecords, zoneError = h.client.listZoneRecords(ctx, h.accountId, zoneName, options, h.maxRetries)
+			zoneRecords, zoneError = h.client.listZoneRecords(ctx, h.accountId, zoneName, h.maxRetries)
 
 			errorByRecordId := make(map[int64]updateZoneRecordFailure)
 			if zoneError == nil {
@@ -438,14 +433,19 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			state := "ok"
 			zoneErrorMessage := ""
-			if zoneError != nil || len(failedRecords) > 0 {
+			if zoneError != nil {
 				state = "error"
 				zoneErrorMessage = zoneError.Error()
+			}
+			if len(failedRecords) > 0 {
+				state = "error"
+				zoneErrorMessage = "Failure when synching zone records"
 			}
 			status := updateZoneStatusRequest{
 				Resource: fmt.Sprintf("zone:%d", z[0].id),
 				State:    state,
 				Title:    fmt.Sprintf("CoreDNS %s %s", h.identifier, state),
+				Message:  zoneErrorMessage,
 				Data: updateZoneStatusMessage{
 					Time:              time.Now().UTC().Format(time.RFC3339),
 					CorednsIdentifier: h.identifier,
@@ -453,19 +453,9 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					FailedRecords:     failedRecords,
 				},
 			}
-			statusJson, err := json.Marshal(status)
+			err := h.client.updateZoneStatus(h.accountId, h.apiCaller, h.maxRetries, status)
 			if err != nil {
-				panic(fmt.Errorf("failed to serialise status request: %v", err))
-			}
-			sendStatusError := retryable(h.maxRetries, func() (err error) {
-				err = h.callApi(
-					fmt.Sprintf("/v2/%s/platform/statuses", h.accountId),
-					statusJson,
-				)
-				return
-			})
-			if sendStatusError != nil {
-				log.Errorf("failed to send status: %v", sendStatusError)
+				log.Errorf("failed to update zone status: %v", err)
 			}
 		}(zoneName, z)
 	}

@@ -26,8 +26,8 @@ func (m *fakeDNSimpleClient) getZone(ctx context.Context, accountID string, zone
 	}, nil
 }
 
-func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, options *dnsimple.ZoneRecordListOptions, maxRetries int) ([]dnsimple.ZoneRecord, error) {
-	if zoneName == "example.bad." {
+func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error) {
+	if zoneName == "example.bad" {
 		return nil, errors.New("example.bad. zone is bad")
 	}
 
@@ -106,6 +106,10 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 	}
 
 	return fakeZoneRecords, nil
+}
+
+func (m *fakeDNSimpleClient) updateZoneStatus(accountID string, apiCaller DNSimpleApiCaller, maxRetries int, status updateZoneStatusRequest) (err error) {
+	return nil
 }
 
 func TestDNSimple(t *testing.T) {
