@@ -21,54 +21,80 @@ type fakeDNSimpleClient struct {
 }
 
 func (m *fakeDNSimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
+	if zoneName == "example.bad." {
+		return nil, errors.New("example.bad. zone is bad")
+	}
+
 	return &dnsimple.Zone{
+		ID:   1,
 		Name: "example.org",
 	}, nil
 }
 
 func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error) {
-	if zoneName == "example.bad" {
+	if zoneName == "example.bad." {
 		return nil, errors.New("example.bad. zone is bad")
 	}
 
 	fakeZoneRecords := []dnsimple.ZoneRecord{
 		{
 			Name:    "",
-			Type:    "ALIAS",
-			Content: "alias.example.org.",
-			TTL:     300,
-			Regions: []string{"global", "AMS"},
-		},
-		{
-			Name:    "alias",
-			Type:    "A",
-			Content: "4.3.2.1",
-			TTL:     300,
-			Regions: []string{"global", "AMS"},
-		},
-		{
-			Name:    "record",
 			Type:    "A",
 			Content: "1.2.3.4",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
 		{
-			Name:    "record",
+			Name:    "",
+			Type:    "A",
+			Content: "5.6.7.8",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "",
 			Type:    "AAAA",
 			Content: "2001:db8:85a3::8a2e:370:7334",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
 		{
-			Name:    "cname",
-			Type:    "CNAME",
-			Content: "record.example.org.",
+			Name:    "",
+			Type:    "TXT",
+			Content: "Hello World",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
 		{
-			Name:    "another-region",
+			Name:    "cname",
+			Type:    "CNAME",
+			Content: "example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "external-alias",
+			Type:    "ALIAS",
+			Content: "example.com.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "internal-alias",
+			Type:    "ALIAS",
+			Content: "example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "region",
+			Type:    "A",
+			Content: "1.2.3.4",
+			TTL:     300,
+			Regions: []string{"AMS"},
+		},
+		{
+			Name:    "region",
 			Type:    "A",
 			Content: "4.3.2.1",
 			TTL:     300,
@@ -111,7 +137,6 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 			Regions: []string{"global"},
 		},
 	}
-
 	return fakeZoneRecords, nil
 }
 
@@ -170,43 +195,57 @@ func TestDNSimple(t *testing.T) {
 		wantNS       []string
 		expectedErr  error
 	}{
-		// 0. example.org ALIAS -> A found - success.
+		// 0. example.org A found - success.
+		{
+			qname: "example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"example.org.	300	IN	A	1.2.3.4",
+				"example.org.	300	IN	A	5.6.7.8",
+			},
+		},
+		// 1. example.org AAAA found - success.
 		{
 			qname:      "example.org",
-			qtype:      dns.TypeA,
-			wantAnswer: []string{"example.org.	300	IN	A	4.3.2.1"},
-		},
-		// 1. record.example.org A found - success.
-		{
-			qname:      "record.example.org",
-			qtype:      dns.TypeA,
-			wantAnswer: []string{"record.example.org.	300	IN	A	1.2.3.4"},
-		},
-		// 2. record.example.org AAAA found - success.
-		{
-			qname:      "record.example.org",
 			qtype:      dns.TypeAAAA,
-			wantAnswer: []string{"record.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
+			wantAnswer: []string{"example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
 		},
-		// 3. www.example.org points to example.org CNAME.
-		// Query must return both CNAME and A records.
+		// 2. example.org TXT found - success.
+		{
+			qname:      "example.org",
+			qtype:      dns.TypeTXT,
+			wantAnswer: []string{"example.org.	300	IN	TXT	\"Hello\" \"World\""},
+		},
+		// 3. cname.example.org CNAME found - success.
+		{
+			qname:      "cname.example.org",
+			qtype:      dns.TypeCNAME,
+			wantAnswer: []string{"cname.example.org.	300	IN	CNAME	example.org."},
+		},
+		// 4. cname.example.org A found - success.
+		// cname.example.org. targets example.org. Query should return both
+		// CNAME and A records because we have a local answer for example.org.
 		{
 			qname: "cname.example.org",
 			qtype: dns.TypeA,
 			wantAnswer: []string{
-				"cname.example.org.	300	IN	CNAME	record.example.org.",
-				"record.example.org.	300	IN	A	1.2.3.4",
+				"cname.example.org.	300	IN	CNAME	example.org.",
+				"example.org.	300	IN	A	1.2.3.4",
+				"example.org.	300	IN	A	5.6.7.8",
 			},
 		},
-		// 4. Region not configured. Return SOA record.
+		// 5. region.example.org A found - success.
+		// Only return records for the defined region.
+		// CDG responses are omitted because the region is not defined.
 		{
-			qname:        "another-region.example.org",
-			qtype:        dns.TypeA,
-			wantRetCode:  dns.RcodeSuccess,
-			wantMsgRCode: dns.RcodeNameError,
-			wantNS:       []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+			qname:       "region.example.org",
+			qtype:       dns.TypeA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer: []string{
+				"region.example.org.	300	IN	A	1.2.3.4",
+			},
 		},
-		// 5. POOL record.
+		// 6. POOL record.
 		{
 			qname:       "pool.example.org",
 			qtype:       dns.TypeCNAME,
@@ -216,7 +255,7 @@ func TestDNSimple(t *testing.T) {
 				"pool.example.org.	300	IN	CNAME	b.pool.example.com.",
 			},
 		},
-		// 6. SRV record.
+		// 7. SRV record.
 		{
 			qname: "srv.example.org",
 			qtype: dns.TypeSRV,
@@ -224,7 +263,56 @@ func TestDNSimple(t *testing.T) {
 				"srv.example.org.	300	IN	SRV	0 5 5060 sipserver.example.com.",
 			},
 		},
-		// 7. URL record.
+		// 8. URL record.
+		{
+			qname: "url.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"url.example.org.	300	IN	A	3.12.205.86",
+				"url.example.org.	300	IN	A	3.13.31.214",
+				"url.example.org.	300	IN	A	52.15.124.193",
+			},
+		},
+		// 9. SRV record. SRV found - success.
+		{
+			qname: "srv.example.org",
+			qtype: dns.TypeSRV,
+			wantAnswer: []string{
+				"srv.example.org.	300	IN	SRV	0 5 5060 sipserver.example.com.",
+			},
+		},
+		// 10. ALIAS record with internal target. A found - sucess.
+		{
+			qname: "internal-alias.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"internal-alias.example.org.	300	IN	A	1.2.3.4",
+				"internal-alias.example.org.	300	IN	A	5.6.7.8",
+			},
+		},
+		// 11. ALIAS record with external target. A found - success.
+		{
+			qname: "external-alias.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"external-alias.example.org.	300	IN	A	93.184.216.34",
+			},
+		},
+		// 12. TXT following ALIAS record. TXT found - success.
+		{
+			qname:      "internal-alias.example.org",
+			qtype:      dns.TypeTXT,
+			wantAnswer: []string{"internal-alias.example.org.	300	IN	TXT	\"Hello\" \"World\""},
+		},
+		// 13. SOA record. SOA found - success.
+		{
+			qname: "example.org",
+			qtype: dns.TypeSOA,
+			wantAnswer: []string{
+				"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300",
+			},
+		},
+		// 14. URL record. A found - success.
 		{
 			qname: "url.example.org",
 			qtype: dns.TypeA,

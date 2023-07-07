@@ -85,11 +85,12 @@ type DNSimple struct {
 }
 
 type zone struct {
-	id     int64
-	fqdn   string // fqdn containing the trailing dot
-	name   string
-	pools  map[string][]string
-	region string
+	id      int64
+	fqdn    string // fqdn containing the trailing dot
+	name    string
+	aliases map[string]bool
+	pools   map[string][]string
+	region  string
 
 	zone *file.Zone
 }
@@ -189,8 +190,8 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		h.lock.RLock()
 		msg.Answer, msg.Ns, msg.Extra, result = regionalZone.zone.Lookup(ctx, state, qname)
 		h.lock.RUnlock()
-		if state.Name() == zoneName {
-			maybeInterceptAliasResponse(ctx, h.dnsResolver, state, msg, &result)
+		if regionalZone.aliases[qname] {
+			maybeInterceptAliasResponse(ctx, h.dnsResolver, state, &msg.Answer, &result)
 		}
 		maybeInterceptPoolResponse(regionalZone, &msg.Answer)
 
@@ -220,84 +221,72 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 	return dns.RcodeSuccess, nil
 }
 
-func maybeInterceptAliasResponse(ctx context.Context, dnsResolver *net.Resolver, state request.Request, msg *dns.Msg, result *file.Result) {
-	// Loop throught any answers and determine if we already have an A or AAAA record.
-	// If we do, we need to replace the answers with only the A or AAAA resource records.
-	// If we don't, we need to resolve the ALIAS (CNAME) record and replace it with the A or AAAA records.
-	// If we can't resolve the ALIAS record, we need to leave it as is.
-	var resolvedAnswers []dns.RR
+func maybeInterceptAliasResponse(ctx context.Context, dnsResolver *net.Resolver, state request.Request, answer *[]dns.RR, result *file.Result) {
+	haveAnswer := false
+	newAnswer := make([]dns.RR, 0)
+	var target string
+	var ttl uint32
 
-	if len(msg.Answer) > 0 {
-		for _, answer := range msg.Answer {
-			switch answer.(type) {
-			case *dns.A:
-				// Add the A records to the answer.
-				r := new(dns.A)
-				r.Hdr = dns.RR_Header{
-					Name:   state.Name(),
-					Rrtype: dns.TypeA,
-					Class:  dns.ClassINET,
-					Ttl:    answer.Header().Ttl,
-				}
-				r.A = answer.(*dns.A).A
-				resolvedAnswers = append(resolvedAnswers, r)
-			case *dns.AAAA:
-				// Add the AAAA records to the answer.
-				r := new(dns.AAAA)
-				r.Hdr = dns.RR_Header{
-					Name:   state.Name(),
-					Rrtype: dns.TypeAAAA,
-					Class:  dns.ClassINET,
-					Ttl:    answer.Header().Ttl,
-				}
-				r.AAAA = answer.(*dns.AAAA).AAAA
-				resolvedAnswers = append(resolvedAnswers, r)
-			case *dns.CNAME:
-				// We have a CNAME record, so we need to resolve it.
-				ips, err := dnsResolver.LookupIP(ctx, "ip", answer.(*dns.CNAME).Target)
-				if err != nil {
-					fmt.Sprintf("failed to resolve ALIAS record %s with error: %v", answer.(*dns.CNAME).Target, err)
-					continue
-				}
-				for _, res := range ips {
-					rtype := "AAAA"
-					if res.To4() != nil {
-						rtype = "A"
-					}
+	if len(*answer) > 0 {
+		// We may have resolved the alias target locally via the file plugin.
+		for _, a := range *answer {
+			// Determine the alias target and the ttl from the synthesized cname record.
+			if a.Header().Rrtype == dns.TypeCNAME {
+				target = a.(*dns.CNAME).Target
+				ttl = a.Header().Ttl
+			}
+			// Determine if we have an answer for the matching qtype.
+			if a.Header().Rrtype != dns.TypeCNAME && a.Header().Rrtype == state.QType() {
+				haveAnswer = true
+				break
+			}
+		}
 
-					switch rtype {
-					case "A":
-						// Add the A records to the answer.
-						r := new(dns.A)
-						r.Hdr = dns.RR_Header{
-							Name:   state.Name(),
-							Rrtype: dns.TypeA,
-							Class:  dns.ClassINET,
-							Ttl:    answer.Header().Ttl,
-						}
-						r.A = res.To4()
-						resolvedAnswers = append(resolvedAnswers, r)
-					case "AAAA":
-						// Add the AAAA records to the answer.
-						r := new(dns.AAAA)
-						r.Hdr = dns.RR_Header{
-							Name:   state.Name(),
-							Rrtype: dns.TypeAAAA,
-							Class:  dns.ClassINET,
-							Ttl:    answer.Header().Ttl,
-						}
-						r.AAAA = res.To16()
-						resolvedAnswers = append(resolvedAnswers, r)
-					}
+		if haveAnswer {
+			// We have an answer for the matching qtype.
+			// Append the rr to the new answer set.
+			for _, a := range *answer {
+				if a.Header().Rrtype != dns.TypeCNAME && a.Header().Rrtype == state.QType() {
+					a.Header().Name = state.Name()
+					newAnswer = append(newAnswer, a)
 				}
 			}
+		} else {
+			// We don't have an answer for the matching qtype. We need to
+			// resolve the alias target externally.
+			dnsClient := new(dns.Client)
+			dnsClient.Net = "udp"
+			dnsClient.Timeout = 10 * time.Second
+
+			m := new(dns.Msg)
+			m.SetQuestion(target, state.QType())
+			m.RecursionDesired = true
+
+			r, rtt, err := dnsClient.ExchangeContext(ctx, m, "1.1.1.1:53")
+			log.Debugf("external resolution of alias target %s in %v", target, rtt, r)
+			if err != nil || len(r.Answer) == 0 {
+				log.Errorf("failed to resolve alias target %s: %v", target, err)
+				return
+			}
+
+			for _, r := range r.Answer {
+				// Determine the lowest ttl
+				if ttl > r.Header().Ttl {
+					ttl = r.Header().Ttl
+				}
+				// Replace the name with the original qname and set the lowest ttl.
+				r.Header().Name = state.Name()
+				r.Header().Ttl = ttl
+				// Append the rr to the new answer set.
+				newAnswer = append(newAnswer, r)
+			}
+		}
+		if len(newAnswer) > 0 {
+			*answer = newAnswer
+			*result = file.Success
 		}
 	}
 
-	if resolvedAnswers != nil {
-		*result = file.Success
-		msg.Answer = resolvedAnswers
-	}
 }
 
 func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
@@ -353,7 +342,7 @@ type updateZoneStatusRequest struct {
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, aliases map[string]bool, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	failures := make([]updateZoneRecordFailure, 0)
 	for _, rec := range records {
@@ -376,10 +365,14 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 
 		if rec.Type == "ALIAS" {
 			// ALIAS records act as CNAME for the apex.
-			rawRecords = append(rawRecords, rawRecord{
-				typ:     "CNAME",
-				content: rec.Content,
-			})
+			// Store the fqdn and target in the zones aliases to intercept the response.
+			if !aliases[fqdn] {
+				aliases[fqdn] = true
+				rawRecords = append(rawRecords, rawRecord{
+					typ:     "CNAME",
+					content: rec.Content,
+				})
+			}
 		} else if rec.Type == "MX" {
 			// MX records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{
@@ -479,15 +472,17 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				for i, regionalZone := range z {
 					newZone := file.NewZone(zoneName, "")
 					newZone.Upstream = h.upstream
-					newPools := make(map[string][]string, 16)
+					newAliases := make(map[string]bool)
+					newPools := make(map[string][]string)
 
 					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
-					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone, h.dnsResolver)
+					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone, h.dnsResolver)
 					for _, f := range failedRecords {
 						errorByRecordId[f.Record.ID] = f
 					}
 
 					h.lock.Lock()
+					(*z[i]).aliases = newAliases
 					(*z[i]).pools = newPools
 					(*z[i]).zone = newZone
 					h.lock.Unlock()
