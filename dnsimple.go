@@ -263,7 +263,7 @@ func maybeInterceptAliasResponse(ctx context.Context, dnsResolver *net.Resolver,
 			m.RecursionDesired = true
 
 			r, rtt, err := dnsClient.ExchangeContext(ctx, m, "1.1.1.1:53")
-			log.Debugf("external resolution of alias target %s in %v", target, rtt, r)
+			log.Debugf("external resolution of alias target %s in %v", target, rtt)
 			if err != nil || len(r.Answer) == 0 {
 				log.Errorf("failed to resolve alias target %s: %v", target, err)
 				return
