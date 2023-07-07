@@ -189,6 +189,9 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		h.lock.RLock()
 		msg.Answer, msg.Ns, msg.Extra, result = regionalZone.zone.Lookup(ctx, state, qname)
 		h.lock.RUnlock()
+		if state.Name() == zoneName {
+			maybeInterceptAliasResponse(ctx, h.dnsResolver, state, msg, &result)
+		}
 		maybeInterceptPoolResponse(regionalZone, &msg.Answer)
 
 		// Take the answer if it's non-empty OR if there is another
@@ -215,6 +218,86 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 
 	w.WriteMsg(msg)
 	return dns.RcodeSuccess, nil
+}
+
+func maybeInterceptAliasResponse(ctx context.Context, dnsResolver *net.Resolver, state request.Request, msg *dns.Msg, result *file.Result) {
+	// Loop throught any answers and determine if we already have an A or AAAA record.
+	// If we do, we need to replace the answers with only the A or AAAA resource records.
+	// If we don't, we need to resolve the ALIAS (CNAME) record and replace it with the A or AAAA records.
+	// If we can't resolve the ALIAS record, we need to leave it as is.
+	var resolvedAnswers []dns.RR
+
+	if len(msg.Answer) > 0 {
+		for _, answer := range msg.Answer {
+			switch answer.(type) {
+			case *dns.A:
+				// Add the A records to the answer.
+				r := new(dns.A)
+				r.Hdr = dns.RR_Header{
+					Name:   state.Name(),
+					Rrtype: dns.TypeA,
+					Class:  dns.ClassINET,
+					Ttl:    answer.Header().Ttl,
+				}
+				r.A = answer.(*dns.A).A
+				resolvedAnswers = append(resolvedAnswers, r)
+			case *dns.AAAA:
+				// Add the AAAA records to the answer.
+				r := new(dns.AAAA)
+				r.Hdr = dns.RR_Header{
+					Name:   state.Name(),
+					Rrtype: dns.TypeAAAA,
+					Class:  dns.ClassINET,
+					Ttl:    answer.Header().Ttl,
+				}
+				r.AAAA = answer.(*dns.AAAA).AAAA
+				resolvedAnswers = append(resolvedAnswers, r)
+			case *dns.CNAME:
+				// We have a CNAME record, so we need to resolve it.
+				ips, err := dnsResolver.LookupIP(ctx, "ip", answer.(*dns.CNAME).Target)
+				if err != nil {
+					fmt.Sprintf("failed to resolve ALIAS record %s with error: %v", answer.(*dns.CNAME).Target, err)
+					continue
+				}
+				for _, res := range ips {
+					rtype := "AAAA"
+					if res.To4() != nil {
+						rtype = "A"
+					}
+
+					switch rtype {
+					case "A":
+						// Add the A records to the answer.
+						r := new(dns.A)
+						r.Hdr = dns.RR_Header{
+							Name:   state.Name(),
+							Rrtype: dns.TypeA,
+							Class:  dns.ClassINET,
+							Ttl:    answer.Header().Ttl,
+						}
+						r.A = res.To4()
+						resolvedAnswers = append(resolvedAnswers, r)
+					case "AAAA":
+						// Add the AAAA records to the answer.
+						r := new(dns.AAAA)
+						r.Hdr = dns.RR_Header{
+							Name:   state.Name(),
+							Rrtype: dns.TypeAAAA,
+							Class:  dns.ClassINET,
+							Ttl:    answer.Header().Ttl,
+						}
+						r.AAAA = res.To16()
+						resolvedAnswers = append(resolvedAnswers, r)
+					}
+				}
+			}
+		}
+	}
+
+	if resolvedAnswers != nil {
+		*result = file.Success
+		msg.Answer = resolvedAnswers
+	}
 }
 
 func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
@@ -292,24 +375,11 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		rawRecords := make([]rawRecord, 0)
 
 		if rec.Type == "ALIAS" {
-			ips, err := dnsResolver.LookupIP(context.Background(), "ip", rec.Content)
-			if err != nil {
-				failures = append(failures, updateZoneRecordFailure{
-					Record: rec,
-					Error:  fmt.Sprintf("failed to resolve ALIAS record %s with error: %v", rec.Content, err),
-				})
-				continue
-			}
-			for _, res := range ips {
-				typ := "AAAA"
-				if res.To4() != nil {
-					typ = "A"
-				}
-				rawRecords = append(rawRecords, rawRecord{
-					typ:     typ,
-					content: res.String(),
-				})
-			}
+			// ALIAS records act as CNAME for the apex.
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "CNAME",
+				content: rec.Content,
+			})
 		} else if rec.Type == "MX" {
 			// MX records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{

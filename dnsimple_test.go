@@ -35,7 +35,14 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 		{
 			Name:    "",
 			Type:    "ALIAS",
-			Content: "example.org.",
+			Content: "alias.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "alias",
+			Type:    "A",
+			Content: "4.3.2.1",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
@@ -167,7 +174,7 @@ func TestDNSimple(t *testing.T) {
 		{
 			qname:      "example.org",
 			qtype:      dns.TypeA,
-			wantAnswer: []string{"example.org.	300	IN	A	93.184.216.34"},
+			wantAnswer: []string{"example.org.	300	IN	A	4.3.2.1"},
 		},
 		// 1. record.example.org A found - success.
 		{
