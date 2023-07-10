@@ -83,7 +83,7 @@ To help demonstrate how ALIAS records and DNS resolvers interact, consider the f
 - Private network with DNS resolver set to a central private DNS server 192.168.0.1 via DHCP.
 - Two additional CoreDNS servers at 192.168.0.2 and 192.168.0.3, acting as the authority for `a.local` and `b.local` respectively.
 - The central server delegates queries to zones `a.local` and `b.local` to those CoreDNS servers, and forwards all others to the public resolver 1.1.1.1.
-- On the `a.local` zone, the records `ALIAS a.local -> b.local` and `CNAME ext.a.local external.com` exist.
+- On the `a.local` zone, the records `ALIAS a.local -> b.local` and `CNAME ext.a.local -> external.com` exist.
 - On the `b.local` zone, the record `ALIAS b.local -> ext.a.local` exists.
 
 Given a query of `a.local`, the expected flow should be:
