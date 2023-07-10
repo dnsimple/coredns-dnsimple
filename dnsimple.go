@@ -412,7 +412,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			}
 			aliases[fqdn] = append(aliases[fqdn], rec.Content)
 			if !isFirst {
-				// We have already inserted a record for this ALIAS name, there's no point to adding more.
+				// We have already inserted a record for this ALIAS name, and we must not add any more.
 				continue
 			}
 			// This is a dummy record to represent the dummy record, so we can identify it when we intercept the response from the `file` plugin.
