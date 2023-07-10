@@ -577,21 +577,19 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 	visitNode = func(root string, fqdn string) {
 		n, _ := aliasGraph.get(fqdn)
 		for _, c := range n {
-			switch c := c.(type) {
-			case string:
-				// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
-				if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
-					if ips, ok := aaaaaRecords[c]; ok {
-						for _, ip := range ips {
-							aliases.insertIp(root, ip)
-						}
-					} else {
-						visitNode(root, c)
+			c := c.(string)
+			// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
+			if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
+				if ips, ok := aaaaaRecords[c]; ok {
+					for _, ip := range ips {
+						aliases.insertIp(root, ip)
 					}
 				} else {
-					// This is a CNAME or ALIAS to an external zone.
-					aliases.insertName(root, c)
+					visitNode(root, c)
 				}
+			} else {
+				// This is a CNAME or ALIAS to an external zone.
+				aliases.insertName(root, c)
 			}
 		}
 	}
