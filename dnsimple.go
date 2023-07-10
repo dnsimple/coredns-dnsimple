@@ -54,10 +54,9 @@ func newNameGraph() *nameGraph {
 	}
 }
 
-func (g *nameGraph) get(name string) ([]interface{}, bool) {
-	k := withoutDot(name)
-	list, ok := g.m[k]
-	return list, ok
+func (g *nameGraph) get(name string) (list []interface{}, ok bool) {
+	list, ok = g.m[withoutDot(name)]
+	return
 }
 
 func (g *nameGraph) insertIp(name string, value net.IP) {
@@ -67,8 +66,7 @@ func (g *nameGraph) insertIp(name string, value net.IP) {
 
 func (g *nameGraph) insertName(name string, value string) {
 	k := withoutDot(name)
-	v := withoutDot(value)
-	g.m[k] = append(g.m[k], v)
+	g.m[k] = append(g.m[k], withoutDot(value))
 }
 
 type DNSimpleApiCaller func(path string, body []byte) error
@@ -228,7 +226,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 			&msg.Answer,
 			&result,
 		)
-		maybeInterceptPoolResponse(h.dnsResolver, regionalZone, &msg.Answer)
+		maybeInterceptPoolResponse(regionalZone, &msg.Answer)
 
 		// Take the answer if it's non-empty OR if there is another
 		// record type that exists for this name (NODATA).
@@ -272,7 +270,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 //
 // The last record is a dummy record representing **all** ALIAS records with this name.
 // Its value is arbitrary and doesn't matter, but a value like 255.255.255.255 can help distinguish it when debugging.
-// Notice that, in this example, the dummy value matches the first record which is an actual A record; this is to demonstrate that the dummy value can conflict and duplicate with another real A record's value and still work OK. The `file` plugin will accept and return duplicate A (name, value) record pairs.
+// Notice that, in this example, the dummy value matches the first record which is an actual A record; this is to demonstrate that the dummy value can conflict and duplicate with another real A record's value and still work OK. The `file` plugin will accept and return duplicate A record (name, value) pairs.
 //
 // We also collect all ALIAS record targets for a name into the `aliases[name][]target` map.
 // Upon lookup using the `file` plugin, we iterate through all answers and find records matching these criteria:
@@ -325,11 +323,15 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 				switch tgt := tgt.(type) {
 				case net.IP:
 					if ip4 := tgt.To4(); ip4 != nil {
+						// IP is v4. Only add if query requests A.
 						if qtype == 1 {
 							ips = []net.IP{tgt}
 						}
-					} else if qtype == 28 {
-						ips = []net.IP{tgt}
+					} else {
+						// IP is v6. Only add if query requests AAAA.
+						if qtype == 28 {
+							ips = []net.IP{tgt}
+						}
 					}
 				case string:
 					// If it's a string, it's always an external zone.
@@ -388,7 +390,7 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 	*answers = newAnswers
 }
 
-func maybeInterceptPoolResponse(dnsResolver *net.Resolver, zone *zone, answers *[]dns.RR) {
+func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
 	if len(*answers) != 1 {
 		return
 	}
@@ -584,9 +586,9 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 					for _, ip := range ips {
 						aliases.insertIp(root, ip)
 					}
-				} else {
-					visitNode(root, c)
 				}
+				// A name could have both A and ALIAS records, so this should not be in an `else` branch.
+				visitNode(root, c)
 			} else {
 				// This is a CNAME or ALIAS to an external zone.
 				aliases.insertName(root, c)
