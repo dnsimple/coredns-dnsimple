@@ -87,8 +87,7 @@ To help demonstrate how ALIAS records and DNS resolvers interact, consider the f
 - On the `b.local` zone, the record `ALIAS b.local -> ext.a.local` exists.
 
 Given a query of `a.local`, the expected flow should be:
-- Query of `a.local` from the client to 192.168.0.1.
-- Query of `a.local` from 192.168.0.1 to 192.168.0.2.
+- Query of `a.local` from the client to 192.168.0.1, delegated to 192.168.0.2.
 - Query of `b.local` from 192.168.0.2 to 192.168.0.1, delegated to 192.168.0.3.
 - Query of `ext.a.local` from 192.168.0.3 to 192.168.0.1, delegated to 192.168.0.2.
 - Query of `example.com` from 192.168.0.2 to 192.168.0.1, delegated to 1.1.1.1.
