@@ -1,0 +1,53 @@
+name: Docker
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+env:
+  GO_VERSION: '1.20'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare CoreDNS with DNSimple Plugin
+        run: |
+          git clone https://github.com/coredns/coredns
+          pushd coredns
+          pluginDir="$PWD/plugin/dnsimple"
+          mkdir -p plugin/dnsimple
+          cp ../*.go plugin/dnsimple
+          sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => $pluginDir" go.mod
+          sed -i '/route53:route53/i dnsimple:dnsimple' plugin.cfg
+          GOFLAGS=-mod=mod go generate
+          go mod tidy
+          cp ../Dockerfile.release .
+          rm ./.dockerignore
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./coredns
+          file: ./coredns/Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            dnsimple/coredns:latest
+            dnsimple/coredns:${{ github.ref_name }}
