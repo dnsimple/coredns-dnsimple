@@ -73,7 +73,7 @@ example.org {
 
 ## ALIAS records
 
-ALIAS records are handled by resolving at query time, using the system DNS resolver or the custom resolver specified by `custom_dns_resolver`. This should work as expected for most use cases, including ALIAS records that target other domains that only exist within your private network, as CoreDNS should be running inside your private network and therefore have the same DNS resolver settings as any other device inside the network.
+ALIAS records are handled by resolving the target at query time, using the system DNS resolver or the custom resolver specified by `custom_dns_resolver`. This should work as expected for most use cases, including ALIAS records that target other domains that only exist within your private network, as CoreDNS should be running inside your private network and therefore have the same DNS resolver settings as any other device inside the network.
 
 <details>
 <summary>Detailed example</summary>
