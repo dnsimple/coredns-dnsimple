@@ -50,4 +50,4 @@ jobs:
           push: true
           tags: |
             dnsimple/coredns:latest
-            dnsimple/coredns:${{ github.ref }}
+            dnsimple/coredns:${{ github.ref_name }}
