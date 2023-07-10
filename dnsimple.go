@@ -225,21 +225,65 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 	return dns.RcodeSuccess, nil
 }
 
+// How ALIAS records work:
+// Let's take an example zone with the following records:
+//
+//   A      my.com    255.255.255.255
+//   A      my.com    1.1.1.1
+//   ALIAS  my.com    a1.com
+//   ALIAS  my.com    a2.com
+//
+// We insert the following records into our `file` plugin zone:
+//
+//   A      my.com    255.255.255.255
+//   A      my.com    1.1.1.1
+//   A      my.com    255.255.255.255
+//
+// The last record is a dummy record representing **all** ALIAS records with this name.
+// It's value is arbitrary and doesn't really matter, but a value like 255.255.255.255 can help distinguish it when debugging.
+// Notice that (in this example) the value matches the first record; this is to help demonstrate that the dummy value can conflict and duplicate with another real/actual A record's value and still work OK. The `file` plugin will accept and return duplicate A (name, value) record pairs.
+//
+// We also collect all ALIAS record targets for a name into the `aliases[name][]target` map.
+// Upon lookup using the `file` plugin, we iterate through all answers and find records matching these criteria:
+// - It's an A record.
+// - It's value is 255.255.255.255 (our value for ALIAS dummy records).
+// - It's name exists in the `aliases[name]` map.
+// If so, we need to replace that *one* A record with *zero or more* A/AAAA records by resolving *all* ALIAS targets of that name.
+// To handle the case where a real A record also exists with the same name and a value of `255.255.255.255`, we track which names we've already performed the above logic for using a hash set, and skip it if we see it again.
+//
+// Why does this work?
+// Using the previous examples, consider that when a query comes in for `my.com`, the `file` plugin will return:
+//
+//   A      my.com    255.255.255.255
+//   A      my.com    1.1.1.1
+//   A      my.com    255.255.255.255
+//
+// This is because the `file` plugin, as mentioned already, accepts and returns duplicates.
+// We know that if we see an A record with a value of 255.255.255.255 and its name exists in the `aliases` map, there are two possibilities:
+// - It's a dummy record for ALIAS, and we need to replace it with all resolved ALIAS target records. For example, if a zone has two ALIAS records for `my.com`, one pointing to `a1.com` and another pointing to `a2.com`, it's expected that resolving `my.com` returns all A/AAAA records for both `a1.com` and `a2.com`.
+// - It's a real A record whose actual value is 255.255.255.255 and coincidentally exists alongside one or more ALIAS records with the same name. This is handled by the hash set and why it's necessary.
 func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype uint16, answers *[]dns.RR, result *file.Result) {
 	newAnswers := make([]dns.RR, 0)
 	alreadyResolvedAliasesFor := make(map[string]bool)
 	for _, ans := range *answers {
 		switch a := ans.(type) {
 		case *dns.A:
+			// `zone.aliases[a.Hdr.Name]` => One or more ALIAS records exist for this name.
+			// `alreadyResolvedAliasesFor[a.Hdr.Name]` => We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
+			// `bytes.Equal(a.A, net.IPv4(255, 255, 255, 255)` => This A record represents the special marker for our dummy A records.
 			if targets, ok := zone.aliases[a.Hdr.Name]; ok && !alreadyResolvedAliasesFor[a.Hdr.Name] && bytes.Equal(a.A, net.IPv4(255, 255, 255, 255)) {
 				alreadyResolvedAliasesFor[a.Hdr.Name] = true
+				// For each ALIAS record for this name, resolve their targets.
 				for _, tgt := range targets {
 					var ipType string
+					// 1 is A, 28 is AAAA; see https://en.wikipedia.org/wiki/List_of_DNS_record_types.
+					// If a user requested A, we should only resolve A, and same for AAAA.
 					if qtype == 1 {
 						ipType = "ip4"
 					} else {
 						ipType = "ip6"
 					}
+					// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
 					var ips []net.IP
 					var err error
 					for i := 0; i < 3; i++ {
@@ -249,11 +293,13 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 						}
 						time.Sleep(20 * time.Millisecond)
 					}
+					// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
 					if err != nil {
 						*answers = make([]dns.RR, 0)
 						*result = file.ServerFailure
 						return
 					}
+					// Transform resolve results into CoreDNS answers.
 					for _, res := range ips {
 						hdr := dns.RR_Header{
 							Name:  a.Hdr.Name,
@@ -358,6 +404,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		rawRecords := make([]rawRecord, 0)
 
 		if rec.Type == "ALIAS" {
+			// See the comment for the `maybeInterceptAliasResponse` function for details on how this works.
 			isFirst := false
 			if aliases[fqdn] == nil {
 				aliases[fqdn] = make([]string, 0)
@@ -368,6 +415,7 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 				// We have already inserted a record for this ALIAS name, there's no point to adding more.
 				continue
 			}
+			// This is a dummy record to represent the dummy record, so we can identify it when we intercept the response from the `file` plugin.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     "A",
 				content: "255.255.255.255",
