@@ -38,6 +38,10 @@ func retryable(maxRetries int, cb func() error) error {
 	return nil
 }
 
+func withoutDot(fqdn string) string {
+	return strings.TrimSuffix(fqdn, ".")
+}
+
 // This type exists to ensure keys and values are consistent, as otherwise retrieval and traversal becomes difficult.
 // Values are either net.IP or string.
 type nameGraph struct {
@@ -51,25 +55,19 @@ func newNameGraph() *nameGraph {
 }
 
 func (g *nameGraph) get(name string) ([]interface{}, bool) {
-	k := strings.TrimSuffix(name, ".")
+	k := withoutDot(name)
 	list, ok := g.m[k]
 	return list, ok
 }
 
 func (g *nameGraph) insertIp(name string, value net.IP) {
-	k := strings.TrimSuffix(name, ".")
-	if g.m[k] == nil {
-		g.m[k] = make([]interface{}, 0)
-	}
+	k := withoutDot(name)
 	g.m[k] = append(g.m[k], value)
 }
 
 func (g *nameGraph) insertName(name string, value string) {
-	k := strings.TrimSuffix(name, ".")
-	v := strings.TrimSuffix(value, ".")
-	if g.m[k] == nil {
-		g.m[k] = make([]interface{}, 0)
-	}
+	k := withoutDot(name)
+	v := withoutDot(value)
 	g.m[k] = append(g.m[k], v)
 }
 
@@ -122,7 +120,6 @@ type DNSimple struct {
 type zone struct {
 	id      int64
 	fqdn    string // fqdn containing the trailing dot
-	name    string
 	aliases *nameGraph
 	pools   map[string][]string
 	region  string
@@ -138,11 +135,10 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 
 	for fqdn, regions := range keys {
 		fqdn = dns.Fqdn(fqdn)
-		name := strings.TrimSuffix(fqdn, ".")
 
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		res, err := client.getZone(ctx, opts.accountId, name)
+		res, err := client.getZone(ctx, opts.accountId, withoutDot(fqdn))
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +146,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 			zoneNames = append(zoneNames, fqdn)
 		}
 		for _, region := range regions {
-			zones[fqdn] = append(zones[fqdn], &zone{id: res.ID, fqdn: fqdn, name: name, region: region, zone: file.NewZone(fqdn, "")})
+			zones[fqdn] = append(zones[fqdn], &zone{id: res.ID, fqdn: fqdn, region: region, zone: file.NewZone(fqdn, "")})
 		}
 	}
 	dnsResolver := net.DefaultResolver
@@ -450,6 +446,7 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 	failures := make([]updateZoneRecordFailure, 0)
 	// We'll use this to walk `aliasGraph` and build `aliases`.
 	aliasNames := make(map[string]bool)
+	// NOTE: We cannot simply add A/AAAA to `aliasGraph`, as then it becomes impossible to distinguish ALIAS/CNAME -> ... -> A/AAAA and simply A/AAAA; this is important since the `file` plugin will also return A/AAAA records, and we don't want to duplicate them.
 	aaaaaRecords := make(map[string][]net.IP)
 	aliasGraph := newNameGraph()
 	for _, rec := range records {
@@ -540,7 +537,7 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 		for _, raw := range rawRecords {
 			// By building the graph here, we account for and incorporate any transformations e.g. POOL -> CNAME, URL -> A/AAAA.
 			if !raw.isAliasDummy && (raw.typ == "A" || raw.typ == "AAAA") {
-				k := strings.TrimSuffix(fqdn, ".")
+				k := withoutDot(fqdn)
 				if ip := net.ParseIP(raw.content); ip != nil {
 					aaaaaRecords[k] = append(aaaaaRecords[k], ip)
 				} else {
