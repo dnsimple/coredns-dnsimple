@@ -11,7 +11,7 @@ env:
 jobs:
   publish:
     name: Release CoreDNS with DNSimple Plugin
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       # - name: Wait for tests to succeed
@@ -32,12 +32,11 @@ jobs:
 
       - name: Build CoreDNS with DNSimple Plugin
         run: |
-          pluginDir="$PWD"
           git clone https://github.com/coredns/coredns
           pushd coredns
-          echo "sed -i \"s%^go ${{env.GO_VERSION}}%go ${{env.GO_VERSION}}\nreplace github.com/dnsimple/coredns-dnsimple => $pluginDir%\" go.mod"
-          sed -i "s%^go ${{env.GO_VERSION}}%go ${{env.GO_VERSION}}\nreplace github.com/dnsimple/coredns-dnsimple => $pluginDir%" go.mod
-          sed -i 's%route53:route53%dnsimple:github.com/dnsimple/coredns-dnsimple%' plugin.cfg
+          pluginDir="$PWD/plugin/dnsimple"
+          sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => $pluginDir" go.mod
+          sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
           GOFLAGS=-mod=mod go generate
           go mod tidy
           cp ../Makefile.release .

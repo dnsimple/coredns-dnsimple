@@ -1,0 +1,68 @@
+FROM golang:1.20-alpine AS base
+
+# Create appuser
+ENV USER=appuser
+ENV UID=10001
+# See https://stackoverflow.com/a/55757473/12429735RUN
+RUN adduser \
+  --disabled-password \
+  --gecos "" \
+  --home "/nonexistent" \
+  --shell "/sbin/nologin" \
+  --no-create-home \
+  --uid "${UID}" \
+  "${USER}"
+
+# git + make
+RUN apk update && \
+  apk add --update git && \
+  apk add --update make && \
+  apk add --update gcc6 && \
+  apk add --update ca-certificates && \
+  apk add --update libcap-dev && \
+  apk add --update libcap
+
+ENV APP_HOME /app
+WORKDIR ${APP_HOME}
+
+COPY go.mod .
+COPY go.sum .
+
+RUN go mod download
+RUN go mod verify
+
+# ------------------------------------------------------------------------------
+# Build stage
+# ------------------------------------------------------------------------------
+FROM base AS build
+
+ARG GITCOMMIT
+
+COPY . .
+
+ENV CGO_ENABLED=0
+RUN go build \
+  -ldflags "-X github.com/coredns/coredns/coremain.GitCommit=${GITCOMMIT}" \
+  -o build/coredns
+
+RUN chown -R appuser:appuser /app
+
+RUN setcap 'cap_net_bind_service=+ep' /app/build/coredns
+
+# ------------------------------------------------------------------------------
+# Production image
+# ------------------------------------------------------------------------------
+FROM scratch AS production
+
+COPY --from=build /etc/passwd /etc/passwd
+COPY --from=build /etc/group /etc/group
+
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+COPY --from=build /app/build/coredns /
+
+EXPOSE 53 53/udp
+
+CMD ["/coredns"]
+
+USER appuser
