@@ -228,16 +228,16 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 // How ALIAS records work in our plugin:
 // Let's take an example zone with the following records:
 //
-//   A      my.com    255.255.255.255
-//   A      my.com    1.1.1.1
-//   ALIAS  my.com    a1.com
-//   ALIAS  my.com    a2.com
+//	A      my.com    255.255.255.255
+//	A      my.com    1.1.1.1
+//	ALIAS  my.com    a1.com
+//	ALIAS  my.com    a2.com
 //
 // We insert the following records into our `file` plugin zone:
 //
-//   A      my.com    255.255.255.255
-//   A      my.com    1.1.1.1
-//   A      my.com    255.255.255.255
+//	A      my.com    255.255.255.255
+//	A      my.com    1.1.1.1
+//	A      my.com    255.255.255.255
 //
 // The last record is a dummy record representing **all** ALIAS records with this name.
 // Its value is arbitrary and doesn't matter, but a value like 255.255.255.255 can help distinguish it when debugging.
@@ -254,9 +254,9 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 // Why does this work?
 // Using the previous examples, consider that when a query comes in for `my.com`, the `file` plugin will return:
 //
-//   A      my.com    255.255.255.255
-//   A      my.com    1.1.1.1
-//   A      my.com    255.255.255.255
+//	A      my.com    255.255.255.255
+//	A      my.com    1.1.1.1
+//	A      my.com    255.255.255.255
 //
 // This is because the `file` plugin, as mentioned already, accepts and returns duplicates.
 // We know that if we see an A record with a value of 255.255.255.255 and its name exists in the `aliases` map, there are two possibilities:
@@ -270,59 +270,74 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 		case *dns.A:
 			// `zone.aliases[a.Hdr.Name]` => One or more ALIAS records exist for this name.
 			// `alreadyResolvedAliasesFor[a.Hdr.Name]` => We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
-			// `bytes.Equal(a.A, net.IPv4(255, 255, 255, 255)` => This A record represents the special marker for our dummy A records.
-			if targets, ok := zone.aliases[a.Hdr.Name]; ok && !alreadyResolvedAliasesFor[a.Hdr.Name] && bytes.Equal(a.A, net.IPv4(255, 255, 255, 255)) {
-				alreadyResolvedAliasesFor[a.Hdr.Name] = true
-				// For each ALIAS record for this name, resolve their targets.
-				for _, tgt := range targets {
-					var ipType string
-					// 1 is A, 28 is AAAA; see https://en.wikipedia.org/wiki/List_of_DNS_record_types.
-					// If a user requested A, we should only resolve A, and same for AAAA.
-					if qtype == 1 {
-						ipType = "ip4"
-					} else {
-						ipType = "ip6"
-					}
-					// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
-					var ips []net.IP
-					var err error
-					for i := 0; i < 3; i++ {
-						ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
-						if err != nil {
-							break
-						}
-						time.Sleep(20 * time.Millisecond)
-					}
-					// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
+			// `a.A.Equal(net.IPv4(255, 255, 255, 255))` => This A record represents the special marker for our dummy A records.
+			targets, ok := zone.aliases[a.Hdr.Name]
+			if !ok {
+				break
+			}
+
+			if alreadyResolvedAliasesFor[a.Hdr.Name] {
+				break
+			}
+
+			if !a.A.Equal(net.IPv4(255, 255, 255, 255)) {
+				break
+			}
+
+			log.Debugf("Resolving ALIAS targets for %s", a.Hdr.Name)
+
+			alreadyResolvedAliasesFor[a.Hdr.Name] = true
+			// For each ALIAS record for this name, resolve their targets.
+			for _, tgt := range targets {
+				var ipType string
+				// 1 is A, 28 is AAAA; see https://en.wikipedia.org/wiki/List_of_DNS_record_types.
+				// If a user requested A, we should only resolve A, and same for AAAA.
+				if qtype == dns.TypeA {
+					ipType = "ip4"
+				} else {
+					ipType = "ip6"
+				}
+				// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
+				var ips []net.IP
+				var err error
+				for i := 0; i < 3; i++ {
+					ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
 					if err != nil {
-						*answers = make([]dns.RR, 0)
-						*result = file.ServerFailure
-						return
+						break
 					}
-					// Transform resolve results into CoreDNS answers.
-					for _, res := range ips {
-						hdr := dns.RR_Header{
-							Name:  a.Hdr.Name,
-							Class: dns.ClassINET,
-							Ttl:   a.Hdr.Ttl,
-						}
-						if ip4 := res.To4(); ip4 != nil {
-							r := new(dns.A)
-							r.Hdr = hdr
-							r.Hdr.Rrtype = dns.TypeA
-							r.A = ip4
-							newAnswers = append(newAnswers, r)
-						} else {
-							r := new(dns.AAAA)
-							r.Hdr = hdr
-							r.Hdr.Rrtype = dns.TypeAAAA
-							r.AAAA = res
-							newAnswers = append(newAnswers, r)
-						}
+					time.Sleep(20 * time.Millisecond)
+				}
+				// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
+				if err != nil {
+					log.Errorf("Failed to resolve ALIAS target %s: %s", tgt, err)
+
+					*answers = make([]dns.RR, 0)
+					*result = file.ServerFailure
+					return
+				}
+				// Transform resolve results into CoreDNS answers.
+				for _, res := range ips {
+					hdr := dns.RR_Header{
+						Name:  a.Hdr.Name,
+						Class: dns.ClassINET,
+						Ttl:   a.Hdr.Ttl,
+					}
+					if ip4 := res.To4(); ip4 != nil {
+						r := new(dns.A)
+						r.Hdr = hdr
+						r.Hdr.Rrtype = dns.TypeA
+						r.A = ip4
+						newAnswers = append(newAnswers, r)
+					} else {
+						r := new(dns.AAAA)
+						r.Hdr = hdr
+						r.Hdr.Rrtype = dns.TypeAAAA
+						r.AAAA = res
+						newAnswers = append(newAnswers, r)
 					}
 				}
-				continue
 			}
+			continue
 		}
 		newAnswers = append(newAnswers, ans)
 	}
