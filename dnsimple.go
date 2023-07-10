@@ -226,10 +226,6 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 }
 
 func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype uint16, answers *[]dns.RR, result *file.Result) {
-	n := len(*answers)
-	if n == 0 {
-		return
-	}
 	newAnswers := make([]dns.RR, 0)
 	alreadyResolvedAliasesFor := make(map[string]bool)
 	for _, ans := range *answers {
