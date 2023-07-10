@@ -35,6 +35,8 @@ jobs:
           git clone https://github.com/coredns/coredns
           pushd coredns
           pluginDir="$PWD/plugin/dnsimple"
+          mkdir -p plugin/dnsimple
+          cp ../*.go plugin/dnsimple
           sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => $pluginDir" go.mod
           sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
           GOFLAGS=-mod=mod go generate
