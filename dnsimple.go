@@ -85,11 +85,12 @@ type DNSimple struct {
 }
 
 type zone struct {
-	id     int64
-	fqdn   string // fqdn containing the trailing dot
-	name   string
-	pools  map[string][]string
-	region string
+	id      int64
+	fqdn    string // fqdn containing the trailing dot
+	name    string
+	aliases map[string][]string
+	pools   map[string][]string
+	region  string
 
 	zone *file.Zone
 }
@@ -189,16 +190,23 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		h.lock.RLock()
 		msg.Answer, msg.Ns, msg.Extra, result = regionalZone.zone.Lookup(ctx, state, qname)
 		h.lock.RUnlock()
-		maybeInterceptPoolResponse(regionalZone, &msg.Answer)
+		maybeInterceptAliasResponse(
+			h.dnsResolver,
+			regionalZone,
+			r.Question[0].Qtype,
+			&msg.Answer,
+			&result,
+		)
+		maybeInterceptPoolResponse(h.dnsResolver, regionalZone, &msg.Answer)
 
 		// Take the answer if it's non-empty OR if there is another
 		// record type that exists for this name (NODATA).
-		if len(msg.Answer) != 0 || result == file.NoData {
+		if len(msg.Answer) != 0 || result == file.NoData || result == file.ServerFailure {
 			break
 		}
 	}
 
-	if len(msg.Answer) == 0 && result != file.NoData && h.Fall.Through(qname) {
+	if len(msg.Answer) == 0 && result != file.NoData && result != file.ServerFailure && h.Fall.Through(qname) {
 		return plugin.NextOrFailure(h.Name(), h.Next, ctx, w, r)
 	}
 
@@ -217,7 +225,69 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 	return dns.RcodeSuccess, nil
 }
 
-func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
+func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype uint16, answers *[]dns.RR, result *file.Result) {
+	n := len(*answers)
+	if n == 0 {
+		return
+	}
+	newAnswers := make([]dns.RR, 0)
+	alreadyResolvedAliasesFor := make(map[string]bool)
+	for _, ans := range *answers {
+		switch a := ans.(type) {
+		case *dns.A:
+			if targets, ok := zone.aliases[a.Hdr.Name]; ok && !alreadyResolvedAliasesFor[a.Hdr.Name] && bytes.Equal(a.A, net.IPv4(255, 255, 255, 255)) {
+				alreadyResolvedAliasesFor[a.Hdr.Name] = true
+				for _, tgt := range targets {
+					var ipType string
+					if qtype == 1 {
+						ipType = "ip4"
+					} else {
+						ipType = "ip6"
+					}
+					var ips []net.IP
+					var err error
+					for i := 0; i < 3; i++ {
+						ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
+						if err != nil {
+							break
+						}
+						time.Sleep(20 * time.Millisecond)
+					}
+					if err != nil {
+						*answers = make([]dns.RR, 0)
+						*result = file.ServerFailure
+						return
+					}
+					for _, res := range ips {
+						hdr := dns.RR_Header{
+							Name:  a.Hdr.Name,
+							Class: dns.ClassINET,
+							Ttl:   a.Hdr.Ttl,
+						}
+						if ip4 := res.To4(); ip4 != nil {
+							r := new(dns.A)
+							r.Hdr = hdr
+							r.Hdr.Rrtype = dns.TypeA
+							r.A = ip4
+							newAnswers = append(newAnswers, r)
+						} else {
+							r := new(dns.AAAA)
+							r.Hdr = hdr
+							r.Hdr.Rrtype = dns.TypeAAAA
+							r.AAAA = res
+							newAnswers = append(newAnswers, r)
+						}
+					}
+				}
+				continue
+			}
+		}
+		newAnswers = append(newAnswers, ans)
+	}
+	*answers = newAnswers
+}
+
+func maybeInterceptPoolResponse(dnsResolver *net.Resolver, zone *zone, answers *[]dns.RR) {
 	if len(*answers) != 1 {
 		return
 	}
@@ -270,7 +340,7 @@ type updateZoneStatusRequest struct {
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
+func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, aliases map[string][]string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	failures := make([]updateZoneRecordFailure, 0)
 	for _, rec := range records {
@@ -292,24 +362,20 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		rawRecords := make([]rawRecord, 0)
 
 		if rec.Type == "ALIAS" {
-			ips, err := dnsResolver.LookupIP(context.Background(), "ip", rec.Content)
-			if err != nil {
-				failures = append(failures, updateZoneRecordFailure{
-					Record: rec,
-					Error:  fmt.Sprintf("failed to resolve ALIAS record %s with error: %v", rec.Content, err),
-				})
+			isFirst := false
+			if aliases[fqdn] == nil {
+				aliases[fqdn] = make([]string, 0)
+				isFirst = true
+			}
+			aliases[fqdn] = append(aliases[fqdn], rec.Content)
+			if !isFirst {
+				// We have already inserted a record for this ALIAS name, there's no point to adding more.
 				continue
 			}
-			for _, res := range ips {
-				typ := "AAAA"
-				if res.To4() != nil {
-					typ = "A"
-				}
-				rawRecords = append(rawRecords, rawRecord{
-					typ:     typ,
-					content: res.String(),
-				})
-			}
+			rawRecords = append(rawRecords, rawRecord{
+				typ:     "A",
+				content: "255.255.255.255",
+			})
 		} else if rec.Type == "MX" {
 			// MX records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{
@@ -409,15 +475,17 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				for i, regionalZone := range z {
 					newZone := file.NewZone(zoneName, "")
 					newZone.Upstream = h.upstream
-					newPools := make(map[string][]string, 16)
+					newAliases := make(map[string][]string)
+					newPools := make(map[string][]string)
 
 					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
-					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newPools, urlSvcIps, newZone, h.dnsResolver)
+					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone, h.dnsResolver)
 					for _, f := range failedRecords {
 						errorByRecordId[f.Record.ID] = f
 					}
 
 					h.lock.Lock()
+					(*z[i]).aliases = newAliases
 					(*z[i]).pools = newPools
 					(*z[i]).zone = newZone
 					h.lock.Unlock()
