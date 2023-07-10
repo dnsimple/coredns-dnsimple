@@ -38,6 +38,41 @@ func retryable(maxRetries int, cb func() error) error {
 	return nil
 }
 
+// This type exists to ensure keys and values are consistent, as otherwise retrieval and traversal becomes difficult.
+// Values are either net.IP or string.
+type nameGraph struct {
+	m map[string][]interface{}
+}
+
+func newNameGraph() *nameGraph {
+	return &nameGraph{
+		m: make(map[string][]interface{}),
+	}
+}
+
+func (g *nameGraph) get(name string) ([]interface{}, bool) {
+	k := strings.TrimSuffix(name, ".")
+	list, ok := g.m[k]
+	return list, ok
+}
+
+func (g *nameGraph) insertIp(name string, value net.IP) {
+	k := strings.TrimSuffix(name, ".")
+	if g.m[k] == nil {
+		g.m[k] = make([]interface{}, 0)
+	}
+	g.m[k] = append(g.m[k], value)
+}
+
+func (g *nameGraph) insertName(name string, value string) {
+	k := strings.TrimSuffix(name, ".")
+	v := strings.TrimSuffix(value, ".")
+	if g.m[k] == nil {
+		g.m[k] = make([]interface{}, 0)
+	}
+	g.m[k] = append(g.m[k], v)
+}
+
 type DNSimpleApiCaller func(path string, body []byte) error
 
 func createDNSimpleApiCaller(baseUrl string, accessToken string, userAgent string) DNSimpleApiCaller {
@@ -88,7 +123,7 @@ type zone struct {
 	id      int64
 	fqdn    string // fqdn containing the trailing dot
 	name    string
-	aliases map[string][]string
+	aliases *nameGraph
 	pools   map[string][]string
 	region  string
 
@@ -268,18 +303,18 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 	for _, ans := range *answers {
 		switch a := ans.(type) {
 		case *dns.A:
-			// `zone.aliases[a.Hdr.Name]` => One or more ALIAS records exist for this name.
-			// `alreadyResolvedAliasesFor[a.Hdr.Name]` => We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
-			// `a.A.Equal(net.IPv4(255, 255, 255, 255))` => This A record represents the special marker for our dummy A records.
-			targets, ok := zone.aliases[a.Hdr.Name]
+			// One or more ALIAS records exist for this name.
+			finalTargets, ok := zone.aliases.get(a.Hdr.Name)
 			if !ok {
 				break
 			}
 
+			// We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
 			if alreadyResolvedAliasesFor[a.Hdr.Name] {
 				break
 			}
 
+			// This A record represents the special marker for our dummy A records.
 			if !a.A.Equal(net.IPv4(255, 255, 255, 255)) {
 				break
 			}
@@ -287,34 +322,47 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 			log.Debugf("Resolving ALIAS targets for %s", a.Hdr.Name)
 
 			alreadyResolvedAliasesFor[a.Hdr.Name] = true
-			// For each ALIAS record for this name, resolve their targets.
-			for _, tgt := range targets {
-				var ipType string
-				// 1 is A, 28 is AAAA; see https://en.wikipedia.org/wiki/List_of_DNS_record_types.
-				// If a user requested A, we should only resolve A, and same for AAAA.
-				if qtype == dns.TypeA {
-					ipType = "ip4"
-				} else {
-					ipType = "ip6"
-				}
-				// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
-				var ips []net.IP
-				var err error
-				for i := 0; i < 3; i++ {
-					ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
-					if err != nil {
-						break
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
-				// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
-				if err != nil {
-					log.Errorf("Failed to resolve ALIAS target %s: %s", tgt, err)
 
-					*answers = make([]dns.RR, 0)
-					*result = file.ServerFailure
-					return
+			// For each ALIAS record for this name, resolve their targets.
+			for _, tgt := range finalTargets {
+				var ips []net.IP
+				switch tgt := tgt.(type) {
+				case net.IP:
+					if ip4 := tgt.To4(); ip4 != nil {
+						if qtype == 1 {
+							ips = []net.IP{tgt}
+						}
+					} else if qtype == 28 {
+						ips = []net.IP{tgt}
+					}
+				case string:
+					// If it's a string, it's always an external zone.
+					var ipType string
+					// 1 is A, 28 is AAAA; see https://en.wikipedia.org/wiki/List_of_DNS_record_types.
+					// If a user requested A, we should only resolve A, and same for AAAA.
+					if qtype == 1 {
+						ipType = "ip4"
+					} else {
+						ipType = "ip6"
+					}
+					// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
+					var err error
+					for i := 0; i < 3; i++ {
+						ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
+						if err == nil {
+							break
+						}
+						time.Sleep(20 * time.Millisecond)
+					}
+					// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
+					if err != nil {
+						log.Errorf("Failed to resolve ALIAS target %s: %s", tgt, err)
+						*answers = make([]dns.RR, 0)
+						*result = file.ServerFailure
+						return
+					}
 				}
+
 				// Transform resolve results into CoreDNS answers.
 				for _, res := range ips {
 					hdr := dns.RR_Header{
@@ -397,9 +445,13 @@ type updateZoneStatusRequest struct {
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
-func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, aliases map[string][]string, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
+func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, aliases *nameGraph, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	failures := make([]updateZoneRecordFailure, 0)
+	// We'll use this to walk `aliasGraph` and build `aliases`.
+	aliasNames := make(map[string]bool)
+	aaaaaRecords := make(map[string][]net.IP)
+	aliasGraph := newNameGraph()
 	for _, rec := range records {
 		var fqdn string
 		if rec.Name == "" {
@@ -413,27 +465,30 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		}
 
 		type rawRecord struct {
-			typ     string
-			content string
+			typ          string
+			content      string
+			isAliasDummy bool
 		}
 		rawRecords := make([]rawRecord, 0)
 
 		if rec.Type == "ALIAS" {
 			// See the comment for the `maybeInterceptAliasResponse` function for details on how this works.
+
 			isFirst := false
-			if aliases[fqdn] == nil {
-				aliases[fqdn] = make([]string, 0)
+			if _, ok := aliasNames[fqdn]; !ok {
+				aliasNames[fqdn] = true
 				isFirst = true
 			}
-			aliases[fqdn] = append(aliases[fqdn], rec.Content)
+			aliasGraph.insertName(fqdn, rec.Content)
 			if !isFirst {
 				// We have already inserted a record for this ALIAS name, and we must not add any more.
 				continue
 			}
 			// This is a dummy record to represent the dummy record, so we can identify it when we intercept the response from the `file` plugin.
 			rawRecords = append(rawRecords, rawRecord{
-				typ:     "A",
-				content: "255.255.255.255",
+				typ:          "A",
+				content:      "255.255.255.255",
+				isAliasDummy: true,
 			})
 		} else if rec.Type == "MX" {
 			// MX records have a priority and a content field.
@@ -483,6 +538,17 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 		}
 
 		for _, raw := range rawRecords {
+			// By building the graph here, we account for and incorporate any transformations e.g. POOL -> CNAME, URL -> A/AAAA.
+			if !raw.isAliasDummy && (raw.typ == "A" || raw.typ == "AAAA") {
+				k := strings.TrimSuffix(fqdn, ".")
+				if ip := net.ParseIP(raw.content); ip != nil {
+					aaaaaRecords[k] = append(aaaaaRecords[k], ip)
+				} else {
+					log.Errorf("A/AAAA record for %s contains invalid content: %s", fqdn, raw.content)
+				}
+			} else if raw.typ == "CNAME" {
+				aliasGraph.insertName(fqdn, rec.Content)
+			}
 			// Assemble RFC 1035 conforming record to pass into DNS scanner.
 			rfc1035 := fmt.Sprintf("%s %d IN %s %s", fqdn, rec.TTL, raw.typ, raw.content)
 			rr, err := dns.NewRR(rfc1035)
@@ -507,6 +573,35 @@ func updateZoneFromRecords(zoneName string, records []dnsimple.ZoneRecord, zoneR
 			}
 		}
 	}
+
+	// Walk `aliasGraph`.
+	// TODO Handle cycles.
+	var visitNode func(string, string)
+	visitNode = func(root string, fqdn string) {
+		n, _ := aliasGraph.get(fqdn)
+		for _, c := range n {
+			switch c := c.(type) {
+			case string:
+				// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
+				if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
+					if ips, ok := aaaaaRecords[c]; ok {
+						for _, ip := range ips {
+							aliases.insertIp(root, ip)
+						}
+					} else {
+						visitNode(root, c)
+					}
+				} else {
+					// This is a CNAME or ALIAS to an external zone.
+					aliases.insertName(root, c)
+				}
+			}
+		}
+	}
+	for fqdn, _ := range aliasNames {
+		visitNode(fqdn, fqdn)
+	}
+
 	return failures
 }
 
@@ -534,11 +629,11 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				for i, regionalZone := range z {
 					newZone := file.NewZone(zoneName, "")
 					newZone.Upstream = h.upstream
-					newAliases := make(map[string][]string)
+					newAliases := newNameGraph()
 					newPools := make(map[string][]string)
 
 					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
-					failedRecords := updateZoneFromRecords(zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone, h.dnsResolver)
+					failedRecords := updateZoneFromRecords(h.zoneNames, zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone, h.dnsResolver)
 					for _, f := range failedRecords {
 						errorByRecordId[f.Record.ID] = f
 					}
