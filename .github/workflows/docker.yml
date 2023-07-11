@@ -50,7 +50,7 @@ jobs:
           cp ../go.mod plugin/dnsimple
           sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod
           cat go.mod
-          sed -i '/route53:route53/i dnsimple:dnsimple' plugin.cfg
+          sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
           GOFLAGS=-mod=mod go generate
           go mod tidy
           cp ../Dockerfile.release .
