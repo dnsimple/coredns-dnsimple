@@ -27,6 +27,7 @@ WORKDIR ${APP_HOME}
 
 COPY go.mod .
 COPY go.sum .
+COPY plugin/dnsimple/go.mod plugin/dnsimple/go.mod
 
 RUN go mod download
 RUN go mod verify

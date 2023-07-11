@@ -12,14 +12,14 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for tests to succeed
-        uses: lewagon/wait-on-check-action@v1.3.1
-        with:
-          ref: 'refs/heads/main'
-          check-name: 'Run tests'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-          allowed-conclusions: success
+      # - name: Wait for tests to succeed
+      #   uses: lewagon/wait-on-check-action@v1.3.1
+      #   with:
+      #     ref: 'refs/heads/main'
+      #     check-name: 'Run tests'
+      #     repo-token: ${{ secrets.GITHUB_TOKEN }}
+      #     wait-interval: 10
+      #     allowed-conclusions: success
 
       - name: Checkout
         uses: actions/checkout@v3
@@ -36,20 +36,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: 'go.mod'
+
       - name: Prepare CoreDNS with DNSimple Plugin
         run: |
           git clone https://github.com/coredns/coredns
           pushd coredns
-          pluginDir="$PWD/plugin/dnsimple"
           mkdir -p plugin/dnsimple
           cp ../*.go plugin/dnsimple
           cp ../go.mod plugin/dnsimple
-          sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => $pluginDir" go.mod
-          sed -i '/route53:route53/i dnsimple:dnsimple' plugin.cfg
+          sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod
+          sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
           GOFLAGS=-mod=mod go generate
           go mod tidy
           cp ../Dockerfile.release .
-          rm ./.dockerignore
+          rm .dockerignore
+          ls -la
+          ls -la plugin/dnsimple
 
       - name: Build and push
         uses: docker/build-push-action@v4

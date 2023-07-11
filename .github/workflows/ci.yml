@@ -18,16 +18,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
           cache: true
 
+      - run: go mod tidy
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
           version: latest
+          only-new-issues: true
           skip-pkg-cache: true
           skip-build-cache: true
 
@@ -44,6 +49,8 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
+
+      - run: go mod tidy
 
       - name: Test
         run: make test
