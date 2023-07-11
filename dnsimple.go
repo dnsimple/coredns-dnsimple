@@ -370,13 +370,17 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 					Class: dns.ClassINET,
 					Ttl:   ttl,
 				}
-				if ip4 := res.To4(); ip4 != nil {
+
+				if qtype == dns.TypeA && res.To4() != nil {
 					r := new(dns.A)
 					r.Hdr = hdr
 					r.Hdr.Rrtype = dns.TypeA
-					r.A = ip4
+					r.A = res
 					newAnswers = append(newAnswers, r)
-				} else {
+					continue
+				}
+
+				if qtype == dns.TypeAAAA && res.To16() != nil {
 					r := new(dns.AAAA)
 					r.Hdr = hdr
 					r.Hdr.Rrtype = dns.TypeAAAA
@@ -404,6 +408,7 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 				return
 			}
 		}
+
 		newAnswers = append(newAnswers, ans)
 	}
 	*answers = newAnswers

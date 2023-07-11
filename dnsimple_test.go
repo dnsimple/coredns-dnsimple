@@ -318,6 +318,14 @@ func TestDNSimple(t *testing.T) {
 			wantRetCode: dns.RcodeSuccess,
 			wantAnswer:  []string{"internal-alias.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
 		},
+		// ALIAS record with internal target. TXT - NODATA.
+		{
+			qname:       "internal-alias.example.org",
+			qtype:       dns.TypeTXT,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
 		// ALIAS record with external target. A found - success.
 		{
 			qname: "external-alias.example.org",
