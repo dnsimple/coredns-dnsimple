@@ -597,27 +597,32 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 	}
 
 	// Walk `aliasGraph`.
-	// TODO Handle cycles.
-	var visitNode func(string, string)
-	visitNode = func(root string, fqdn string) {
-		n, _ := aliasGraph.get(fqdn)
-		for _, c := range n {
-			c := c.(string)
-			// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
-			if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
-				for _, ip := range aaaaaRecords[c] {
-					aliases.insertIp(root, ip)
+	var visitNode func(map[string]bool, string, string)
+	visitNode = func(seen map[string]bool, root string, fqdn string) {
+		if seen[fqdn] {
+			log.Errorf("ALIAS record %s will never resolve because it contains a cycle", root)
+		} else {
+			seen[fqdn] = true
+			n, _ := aliasGraph.get(fqdn)
+			for _, c := range n {
+				c := c.(string)
+				// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
+				if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
+					for _, ip := range aaaaaRecords[c] {
+						aliases.insertIp(root, ip)
+					}
+					// A name could have both A and ALIAS records, so this should not be in an `else` branch.
+					visitNode(seen, root, c)
+				} else {
+					// This is a CNAME or ALIAS to an external zone.
+					aliases.insertName(root, c)
 				}
-				// A name could have both A and ALIAS records, so this should not be in an `else` branch.
-				visitNode(root, c)
-			} else {
-				// This is a CNAME or ALIAS to an external zone.
-				aliases.insertName(root, c)
 			}
+			seen[fqdn] = false
 		}
 	}
-	for fqdn, _ := range aliasNames {
-		visitNode(fqdn, fqdn)
+	for fqdn := range aliasNames {
+		visitNode(make(map[string]bool), fqdn, fqdn)
 	}
 
 	return failures
