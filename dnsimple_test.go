@@ -102,6 +102,13 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 			Regions: []string{"global", "AMS"},
 		},
 		{
+			Name:    "internal-alias-no-data",
+			Type:    "ALIAS",
+			Content: "does-not-exist.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
 			Name:    "record",
 			Type:    "A",
 			Content: "1.2.3.4",
@@ -322,6 +329,22 @@ func TestDNSimple(t *testing.T) {
 		{
 			qname:       "internal-alias.example.org",
 			qtype:       dns.TypeTXT,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with internal target. AAAA - NODATA.
+		{
+			qname:       "internal-alias-no-data.example.org",
+			qtype:       dns.TypeAAAA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with internal target. A - NODATA.
+		{
+			qname:       "internal-alias-no-data.example.org",
+			qtype:       dns.TypeA,
 			wantRetCode: dns.RcodeSuccess,
 			wantAnswer:  []string{},
 			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
