@@ -331,7 +331,9 @@ func TestDNSimple(t *testing.T) {
 			qname: "train0.example.org",
 			qtype: dns.TypeA,
 			wantAnswer: []string{
-				"example.org.	300	IN	A	5.5.5.5",
+				"train0.example.org.	300	IN	CNAME	train1.example.org.",
+				"train1.example.org.	300	IN	CNAME	train2.example.org.",
+				"train2.example.org.	300	IN	A	5.5.5.5",
 			},
 		},
 		// CNAME with ALIAS and CNAME targets inside zone. AAAA found - success.
@@ -339,7 +341,9 @@ func TestDNSimple(t *testing.T) {
 			qname: "train0.example.org",
 			qtype: dns.TypeAAAA,
 			wantAnswer: []string{
-				"example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7335",
+				"train0.example.org.	300	IN	CNAME	train1.example.org.",
+				"train1.example.org.	300	IN	CNAME	train2.example.org.",
+				"train2.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7335",
 			},
 		},
 	}
