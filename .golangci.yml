@@ -15,4 +15,4 @@ linters:
     - wastedassign # Finds wasted assignment statements.
     - whitespace # Tool for detection of leading and trailing whitespace
 issues:
-    new-from-rev: eb944efe0c3
+    new-from-rev: 238ac89c7871b7f7bef8f18dc02b852d6dd1448e
