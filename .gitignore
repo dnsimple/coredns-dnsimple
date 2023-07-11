@@ -1,1 +1,4 @@
 /go.sum
+coredns/
+Corefile
+coredns-dnsimple
