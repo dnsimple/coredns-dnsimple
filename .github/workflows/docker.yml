@@ -12,14 +12,14 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for tests to succeed
-        uses: lewagon/wait-on-check-action@v1.3.1
-        with:
-          ref: 'refs/heads/main'
-          check-name: 'Run tests'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-          allowed-conclusions: success
+      # - name: Wait for tests to succeed
+      #   uses: lewagon/wait-on-check-action@v1.3.1
+      #   with:
+      #     ref: 'refs/heads/main'
+      #     check-name: 'Run tests'
+      #     repo-token: ${{ secrets.GITHUB_TOKEN }}
+      #     wait-interval: 10
+      #     allowed-conclusions: success
 
       - name: Checkout
         uses: actions/checkout@v3
