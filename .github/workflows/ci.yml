@@ -50,6 +50,8 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      - run: go mod download
+
       - name: Test
         run: make test
 
