@@ -316,7 +316,7 @@ func TestDNSimple(t *testing.T) {
 			qname:       "internal-alias.example.org",
 			qtype:       dns.TypeAAAA,
 			wantRetCode: dns.RcodeSuccess,
-			wantAnswer:  []string{"record.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
+			wantAnswer:  []string{"internal-alias.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
 		},
 		// ALIAS record with external target. A found - success.
 		{

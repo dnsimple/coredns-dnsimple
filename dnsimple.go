@@ -22,6 +22,9 @@ import (
 	"github.com/miekg/dns"
 )
 
+var ALIAS_DUMMY_IP4 = net.IPv4(255, 255, 255, 255)
+var ALIAS_DUMMY_IP6 = net.ParseIP("e57a:2514:bbce:3edf:0317:158e:3fbf:3e12")
+
 func retryable(maxRetries int, cb func() error) error {
 	for i := 1; i <= 1+maxRetries; i++ {
 		err := cb()
@@ -294,96 +297,112 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype uint16, answers *[]dns.RR, result *file.Result) {
 	newAnswers := make([]dns.RR, 0)
 	alreadyResolvedAliasesFor := make(map[string]bool)
+	maybeInterceptAnswer := func(ip net.IP, dummyIp net.IP, name string, ttl uint32) bool {
+		// One or more ALIAS records exist for this name.
+		finalTargets, ok := zone.aliases.get(name)
+		if !ok {
+			return false
+		}
+
+		// We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
+		if alreadyResolvedAliasesFor[name] {
+			return false
+		}
+
+		// This A record represents the special marker for our dummy A records.
+		if !ip.Equal(dummyIp) {
+			return false
+		}
+
+		log.Debugf("Resolving ALIAS targets for %s", name)
+
+		alreadyResolvedAliasesFor[name] = true
+
+		// For each ALIAS record for this name, resolve their targets.
+		for _, tgt := range finalTargets {
+			var ips []net.IP
+			switch tgt := tgt.(type) {
+			case net.IP:
+				if ip4 := tgt.To4(); ip4 != nil {
+					// IP is v4. Only add if query requests A.
+					if qtype == dns.TypeA {
+						ips = []net.IP{tgt}
+					}
+				} else {
+					// IP is v6. Only add if query requests AAAA.
+					if qtype == dns.TypeAAAA {
+						ips = []net.IP{tgt}
+					}
+				}
+			case string:
+				// If it's a string, it's always an external zone.
+				var ipType string
+				// If a user requested A, we should only resolve A, and same for AAAA.
+				if qtype == dns.TypeA {
+					ipType = "ip4"
+				} else if qtype == dns.TypeAAAA {
+					ipType = "ip6"
+				} else {
+					panic("unreachable")
+				}
+				// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
+				var err error
+				for i := 0; i < 3; i++ {
+					ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
+					if err == nil {
+						break
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
+				if err != nil {
+					log.Errorf("Failed to resolve ALIAS target %s: %s", tgt, err)
+					*answers = make([]dns.RR, 0)
+					*result = file.ServerFailure
+					return false
+				}
+			}
+
+			// Transform resolve results into CoreDNS answers.
+			for _, res := range ips {
+				hdr := dns.RR_Header{
+					Name:  name,
+					Class: dns.ClassINET,
+					Ttl:   ttl,
+				}
+				if ip4 := res.To4(); ip4 != nil {
+					r := new(dns.A)
+					r.Hdr = hdr
+					r.Hdr.Rrtype = dns.TypeA
+					r.A = ip4
+					newAnswers = append(newAnswers, r)
+				} else {
+					r := new(dns.AAAA)
+					r.Hdr = hdr
+					r.Hdr.Rrtype = dns.TypeAAAA
+					r.AAAA = res
+					newAnswers = append(newAnswers, r)
+				}
+			}
+		}
+		return true
+	}
 	for _, ans := range *answers {
 		switch a := ans.(type) {
 		case *dns.A:
-			// One or more ALIAS records exist for this name.
-			finalTargets, ok := zone.aliases.get(a.Hdr.Name)
-			if !ok {
-				break
+			if didIntercept := maybeInterceptAnswer(a.A, ALIAS_DUMMY_IP4, a.Hdr.Name, a.Hdr.Ttl); didIntercept {
+				continue
 			}
-
-			// We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
-			if alreadyResolvedAliasesFor[a.Hdr.Name] {
-				break
+			if *result == file.ServerFailure {
+				return
 			}
-
-			// This A record represents the special marker for our dummy A records.
-			if !a.A.Equal(net.IPv4(255, 255, 255, 255)) {
-				break
+		case *dns.AAAA:
+			if didIntercept := maybeInterceptAnswer(a.AAAA, ALIAS_DUMMY_IP6, a.Hdr.Name, a.Hdr.Ttl); didIntercept {
+				continue
 			}
-
-			log.Debugf("Resolving ALIAS targets for %s", a.Hdr.Name)
-
-			alreadyResolvedAliasesFor[a.Hdr.Name] = true
-
-			// For each ALIAS record for this name, resolve their targets.
-			for _, tgt := range finalTargets {
-				var ips []net.IP
-				switch tgt := tgt.(type) {
-				case net.IP:
-					if ip4 := tgt.To4(); ip4 != nil {
-						// IP is v4. Only add if query requests A.
-						if qtype == 1 {
-							ips = []net.IP{tgt}
-						}
-					} else {
-						// IP is v6. Only add if query requests AAAA.
-						if qtype == 28 {
-							ips = []net.IP{tgt}
-						}
-					}
-				case string:
-					// If it's a string, it's always an external zone.
-					var ipType string
-					// 1 is A, 28 is AAAA; see https://en.wikipedia.org/wiki/List_of_DNS_record_types.
-					// If a user requested A, we should only resolve A, and same for AAAA.
-					if qtype == 1 {
-						ipType = "ip4"
-					} else {
-						ipType = "ip6"
-					}
-					// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
-					var err error
-					for i := 0; i < 3; i++ {
-						ips, err = dnsResolver.LookupIP(context.Background(), ipType, tgt)
-						if err == nil {
-							break
-						}
-						time.Sleep(20 * time.Millisecond)
-					}
-					// If even one ALIAS fails, we should not simply ignore/skip, and instead fail the entire request.
-					if err != nil {
-						log.Errorf("Failed to resolve ALIAS target %s: %s", tgt, err)
-						*answers = make([]dns.RR, 0)
-						*result = file.ServerFailure
-						return
-					}
-				}
-
-				// Transform resolve results into CoreDNS answers.
-				for _, res := range ips {
-					hdr := dns.RR_Header{
-						Name:  a.Hdr.Name,
-						Class: dns.ClassINET,
-						Ttl:   a.Hdr.Ttl,
-					}
-					if ip4 := res.To4(); ip4 != nil {
-						r := new(dns.A)
-						r.Hdr = hdr
-						r.Hdr.Rrtype = dns.TypeA
-						r.A = ip4
-						newAnswers = append(newAnswers, r)
-					} else {
-						r := new(dns.AAAA)
-						r.Hdr = hdr
-						r.Hdr.Rrtype = dns.TypeAAAA
-						r.AAAA = res
-						newAnswers = append(newAnswers, r)
-					}
-				}
+			if *result == file.ServerFailure {
+				return
 			}
-			continue
 		}
 		newAnswers = append(newAnswers, ans)
 	}
@@ -485,7 +504,12 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 			// This is a dummy record to represent the dummy record, so we can identify it when we intercept the response from the `file` plugin.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:          "A",
-				content:      "255.255.255.255",
+				content:      ALIAS_DUMMY_IP4.String(),
+				isAliasDummy: true,
+			})
+			rawRecords = append(rawRecords, rawRecord{
+				typ:          "AAAA",
+				content:      ALIAS_DUMMY_IP6.String(),
 				isAliasDummy: true,
 			})
 		} else if rec.Type == "MX" {
