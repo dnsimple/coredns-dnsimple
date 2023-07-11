@@ -472,7 +472,6 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 
 		if rec.Type == "ALIAS" {
 			// See the comment for the `maybeInterceptAliasResponse` function for details on how this works.
-
 			isFirst := false
 			if _, ok := aliasNames[fqdn]; !ok {
 				aliasNames[fqdn] = true
@@ -582,10 +581,8 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 			c := c.(string)
 			// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
 			if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
-				if ips, ok := aaaaaRecords[c]; ok {
-					for _, ip := range ips {
-						aliases.insertIp(root, ip)
-					}
+				for _, ip := range aaaaaRecords[c] {
+					aliases.insertIp(root, ip)
 				}
 				// A name could have both A and ALIAS records, so this should not be in an `else` branch.
 				visitNode(root, c)
@@ -604,26 +601,23 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 
 func (h *DNSimple) updateZones(ctx context.Context) error {
 	log.Debugf("starting update zones for dnsimple with identifier %s", h.identifier)
-	var wg sync.WaitGroup
 
 	urlSvcIps, err := net.LookupIP("coredns-url-record-target.dns.solutions")
 	if err != nil {
-		log.Errorf("failed to fetch URL record target: %v", err)
+		log.Errorf("failed to fetch URL record target, URL records will not work: %v", err)
 	}
 
+	var wg sync.WaitGroup
 	for zoneName, z := range h.zones {
 		wg.Add(1)
 		go func(zoneName string, z []*zone) {
 			defer wg.Done()
-			var zoneError error = nil
 
-			var zoneRecords []dnsimple.ZoneRecord
-
-			zoneRecords, zoneError = h.client.listZoneRecords(ctx, h.accountId, zoneName, h.maxRetries)
+			zoneRecords, listZoneError := h.client.listZoneRecords(ctx, h.accountId, zoneName, h.maxRetries)
 
 			errorByRecordId := make(map[int64]updateZoneRecordFailure)
-			if zoneError == nil {
-				for i, regionalZone := range z {
+			if listZoneError == nil {
+				for _, regionalZone := range z {
 					newZone := file.NewZone(zoneName, "")
 					newZone.Upstream = h.upstream
 					newAliases := newNameGraph()
@@ -636,9 +630,9 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					}
 
 					h.lock.Lock()
-					(*z[i]).aliases = newAliases
-					(*z[i]).pools = newPools
-					(*z[i]).zone = newZone
+					regionalZone.aliases = newAliases
+					regionalZone.pools = newPools
+					regionalZone.zone = newZone
 					h.lock.Unlock()
 				}
 			}
@@ -652,13 +646,13 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 
 			state := "ok"
 			zoneErrorMessage := ""
-			if zoneError != nil {
+			if listZoneError != nil {
 				state = "error"
-				zoneErrorMessage = zoneError.Error()
+				zoneErrorMessage = listZoneError.Error()
 			}
 			if len(failedRecords) > 0 {
 				state = "error"
-				zoneErrorMessage = "Failure when synching zone records"
+				zoneErrorMessage = "Failure when syncing zone records"
 			}
 			status := updateZoneStatusRequest{
 				Resource: fmt.Sprintf("zone:%d", z[0].id),
