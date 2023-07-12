@@ -1,0 +1,8 @@
+.:8053 {
+  dnsimple vegan.pizza {
+    account_id 1234
+    identifier "default"
+  }
+  errors
+  log
+}
