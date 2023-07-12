@@ -336,7 +336,7 @@ func TestDNSimple(t *testing.T) {
 				"url.example.org.	300	IN	A	52.15.124.193",
 			},
 		},
-		// ALIAS record with internal target. A found - sucess.
+		// ALIAS record with internal target. A found - success.
 		{
 			qname:       "internal-alias.example.org",
 			qtype:       dns.TypeA,
@@ -346,7 +346,7 @@ func TestDNSimple(t *testing.T) {
 				"internal-alias.example.org.	300	IN	A	1.2.3.5",
 			},
 		},
-		// ALIAS record with internal target. AAAA found - sucess.
+		// ALIAS record with internal target. AAAA found - success.
 		{
 			qname:       "internal-alias.example.org",
 			qtype:       dns.TypeAAAA,

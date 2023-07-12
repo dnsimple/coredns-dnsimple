@@ -22,8 +22,10 @@ import (
 	"github.com/miekg/dns"
 )
 
-var ALIAS_DUMMY_IP4 = net.IPv4(255, 255, 255, 255)
-var ALIAS_DUMMY_IP6 = net.ParseIP("e57a:2514:bbce:3edf:0317:158e:3fbf:3e12")
+var (
+	AliasDummyIPv4 = net.IPv4(255, 255, 255, 255)
+	AliasDummyIPv6 = net.ParseIP("e57a:2514:bbce:3edf:0317:158e:3fbf:3e12")
+)
 
 func retryable(maxRetries int, cb func() error) error {
 	for i := 1; i <= 1+maxRetries; i++ {
@@ -69,7 +71,7 @@ func (g *nameGraph) ensureKeyExists(name string) {
 	}
 }
 
-func (g *nameGraph) insertIp(name string, value net.IP) {
+func (g *nameGraph) insertIP(name string, value net.IP) {
 	k := withoutDot(name)
 	g.m[k] = append(g.m[k], value)
 }
@@ -346,11 +348,12 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 				// If it's a string, it's always an external zone.
 				var ipType string
 				// If a user requested A, we should only resolve A, and same for AAAA.
-				if qtype == dns.TypeA {
+				switch qtype {
+				case dns.TypeA:
 					ipType = "ip4"
-				} else if qtype == dns.TypeAAAA {
+				case dns.TypeAAAA:
 					ipType = "ip6"
-				} else {
+				default:
 					panic("unreachable")
 				}
 				// Try look up 3 times before giving up. Don't delay for too long as DNS queries should be fast.
@@ -402,14 +405,14 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 	for _, ans := range *answers {
 		switch a := ans.(type) {
 		case *dns.A:
-			if didIntercept := maybeInterceptAnswer(a.A, ALIAS_DUMMY_IP4, a.Hdr.Name, a.Hdr.Ttl); didIntercept {
+			if didIntercept := maybeInterceptAnswer(a.A, AliasDummyIPv4, a.Hdr.Name, a.Hdr.Ttl); didIntercept {
 				continue
 			}
 			if *result == file.ServerFailure {
 				return
 			}
 		case *dns.AAAA:
-			if didIntercept := maybeInterceptAnswer(a.AAAA, ALIAS_DUMMY_IP6, a.Hdr.Name, a.Hdr.Ttl); didIntercept {
+			if didIntercept := maybeInterceptAnswer(a.AAAA, AliasDummyIPv6, a.Hdr.Name, a.Hdr.Ttl); didIntercept {
 				continue
 			}
 			if *result == file.ServerFailure {
@@ -481,7 +484,7 @@ type updateZoneStatusRequest struct {
 	Data     updateZoneStatusMessage `json:"data"`
 }
 
-func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, aliases *nameGraph, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone, dnsResolver *net.Resolver) []updateZoneRecordFailure {
+func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimple.ZoneRecord, zoneRegion string, aliases *nameGraph, pools map[string][]string, urlSvcIps []net.IP, zone *file.Zone) []updateZoneRecordFailure {
 	log.Debugf("updating zone %s with region %s", zoneName, zoneRegion)
 	failures := make([]updateZoneRecordFailure, 0)
 	// We'll use this to walk `aliasGraph` and build `aliases`.
@@ -523,12 +526,12 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 			// This is a dummy record to represent the dummy record, so we can identify it when we intercept the response from the `file` plugin.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:          "A",
-				content:      ALIAS_DUMMY_IP4.String(),
+				content:      AliasDummyIPv4.String(),
 				isAliasDummy: true,
 			})
 			rawRecords = append(rawRecords, rawRecord{
 				typ:          "AAAA",
-				content:      ALIAS_DUMMY_IP6.String(),
+				content:      AliasDummyIPv6.String(),
 				isAliasDummy: true,
 			})
 		} else if rec.Type == "MX" {
@@ -628,7 +631,7 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 				// `nameGraph` always normalises keys and values by trimming the dot, but `Matches` requires the dot.
 				if internal := plugin.Zones(zoneNames).Matches(c + "."); internal != "" {
 					for _, ip := range aaaaaRecords[c] {
-						aliases.insertIp(root, ip)
+						aliases.insertIP(root, ip)
 					}
 					// A name could have both A and ALIAS records, so this should not be in an `else` branch.
 					visitNode(seen, root, c)
@@ -674,7 +677,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					newPools := make(map[string][]string)
 
 					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
-					failedRecords := updateZoneFromRecords(h.zoneNames, zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone, h.dnsResolver)
+					failedRecords := updateZoneFromRecords(h.zoneNames, zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone)
 					for _, f := range failedRecords {
 						errorByRecordId[f.Record.ID] = f
 					}
