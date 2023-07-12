@@ -6,29 +6,32 @@
 
 ## Description
 
-The dnsimple plugin is useful for serving zones defined in DNSimple. This plugin supports all [DNSimple records](https://support.dnsimple.com/articles/supported-dns-records/), including [ALIAS](https://support.dnsimple.com/articles/alias-record/), [URL](https://support.dnsimple.com/articles/url-record/), and [POOL](https://support.dnsimple.com/articles/pool-record/).
+The dnsimple plugin is useful for serving zones defined in DNSimple. This plugin supports all [DNSimple record types](https://support.dnsimple.com/articles/supported-dns-records/), including [ALIAS](https://support.dnsimple.com/articles/alias-record/), [URL](https://support.dnsimple.com/articles/url-record/), [POOL](https://support.dnsimple.com/articles/pool-record/) and [regional records](https://support.dnsimple.com/articles/regional-records/).
 
 ## Syntax
 
 ```
-dnsimple ZONE [ZONE ...] {
-    access_token DNSIMPLE_TOKEN
-    account_id   DNSIMPLE_ACCOUNT_ID
-    fallthrough  [ZONES...]
-    max_retries  MAX_RETRIES
-    refresh      DURATION
-    sandbox      BOOLEAN
+dnsimple ZONE[:REGION ZONE ...] {
+    access_token          DNSIMPLE_TOKEN
+    account_id            DNSIMPLE_ACCOUNT_ID
+    base_url              STRING
+    custom_dns_resolver   ADDRESS
+    fallthrough           [ZONES...]
+    identifier            STRING
+    max_retries           MAX_RETRIES
+    refresh               DURATION
 }
 ```
 
-- **ZONE**: The zone names to retrieve from DNSimple.
+- **ZONE**: The zone names to retrieve from DNSimple. Optionally specify a region using `ZONE:REGION`. See the [Regional records](#regional-records) section for more details.
 - `access_token`: The access token to use when calling DNSimple APIs. If it's not provided, the environment variable `DNSIMPLE_TOKEN` will be used.
 - `account_id`: The account ID containing the configured zones. If it's not provided, the environment variable `DNSIMPLE_ACCOUNT_ID` will be used.
+- `base_url`: The base url for interacting with the DNSimple API. If no value is provided the production environment is used. See [DNSimple Sandbox API](https://support.dnsimple.com/articles/sandbox/) for sandbox environment testing.
 - `custom_dns_resolver`: Optionally override the DNS resolver to use for resolving ALIAS records. By default, the system resolver is used. See the [ALIAS records](#alias-records) section for more details.
 - `fallthrough`: If a query matches the zone(s) but no response message can be generated, the query will be passed to the next plugin in the chain. To restrict passing only for specific zones, list them here; all other zone queries will **not** "fall through".
+- `identifer`: Optionally set the CoreDNS instance identifer string. This is used to report the sync status of the zone to the DNSimple application. If no identifier is provided, "default" is used.
 - `max_retries`: Maximum retry attempts to fetch zones using the DNSimple API. Must be greater than zero. Defaults to 3.
 - `refresh`: The interval to refresh zones at. It must be a valid duration, and defaults to `1m`.
-- `sandbox`: If this is set to true, the [DNSimple Sandbox API](https://support.dnsimple.com/articles/sandbox/) will be used instead.
 
 ## Examples
 
@@ -48,6 +51,14 @@ example.org {
     access_token Yshames7AMTNMo7qHLGUkkg06p4rs
     account_id 131072
   }
+}
+```
+
+Enable dnsimple with regional record support:
+
+```
+example.org {
+  dnsimple example.org:AMS
 }
 ```
 
@@ -98,3 +109,19 @@ If all private DNS servers mentioned in the example are configured to resolve us
 ## Authentication
 
 An access token is needed in order to call the DNSimple API. To learn more about these and how to generate them, see this [article](https://support.dnsimple.com/articles/api-access-token/).
+
+## Regional records
+
+Support for [regional records](https://support.dnsimple.com/articles/regional-records/) is prvoided when defining a zone with matching regional records in the Corefile. All global and regional records for any defined zone with a region will be synced. If no region is defined, only global records will be synced for the zone.
+
+Mutliple regions may be defined for the same zone. In the following example: 
+  - A regional record that exists in CDG will be returned if no regional record exists in AMS for the same name. 
+  - A regional record that exists in FRA will be returned if no regional record exists in AMS or CDG for the same name.
+
+Enable dnsimple with multiple regions for the some zone:
+
+```
+example.org {
+  dnsimple example.org:AMS example.org:CDG example.org:FRA
+}
+```
