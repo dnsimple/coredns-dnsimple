@@ -7,7 +7,7 @@ require (
 	github.com/coredns/coredns v1.10.1
 	github.com/dnsimple/dnsimple-go v1.2.0
 	github.com/miekg/dns v1.1.54
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.4
 )
 
 require (
