@@ -62,6 +62,13 @@ func (g *nameGraph) get(name string) (list []interface{}, ok bool) {
 	return
 }
 
+func (g *nameGraph) ensureKeyExists(name string) {
+	k := withoutDot(name)
+	if _, ok := g.m[k]; !ok {
+		g.m[k] = make([]interface{}, 0)
+	}
+}
+
 func (g *nameGraph) insertIp(name string, value net.IP) {
 	k := withoutDot(name)
 	g.m[k] = append(g.m[k], value)
@@ -298,6 +305,11 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 	newAnswers := make([]dns.RR, 0)
 	alreadyResolvedAliasesFor := make(map[string]bool)
 	maybeInterceptAnswer := func(ip net.IP, dummyIp net.IP, name string, ttl uint32) bool {
+		// This A record represents the special marker for our dummy A records.
+		if !ip.Equal(dummyIp) {
+			return false
+		}
+
 		// One or more ALIAS records exist for this name.
 		finalTargets, ok := zone.aliases.get(name)
 		if !ok {
@@ -306,11 +318,6 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 
 		// We haven't already handled ALIAS records for this name; important if there are both A and ALIAS records for the same name.
 		if alreadyResolvedAliasesFor[name] {
-			return false
-		}
-
-		// This A record represents the special marker for our dummy A records.
-		if !ip.Equal(dummyIp) {
 			return false
 		}
 
@@ -627,6 +634,8 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 		}
 	}
 	for fqdn := range aliasNames {
+		// We need to ensure that the key exists as we need to differentiate between a non-ALIAS record name and an ALIAS record name that eventually resolves to nothing.
+		aliases.ensureKeyExists(fqdn)
 		visitNode(make(map[string]bool), fqdn, fqdn)
 	}
 
