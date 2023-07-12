@@ -31,11 +31,101 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 		return nil, errors.New("example.bad. zone is bad")
 	}
 
+	// CNAME train0.dnsim.pl -> train1.dnsim.pl.
+	// CNAME train1.dnsim.pl -> train2.dnsim.pl.
+	// ALIAS train2.dnsim.pl -> train3.dnsim.pl.
+	// CNAME train3.dnsim.pl -> train4.dnsim.pl.
+	// ALIAS train4.dnsim.pl -> example.com.
+
 	fakeZoneRecords := []dnsimple.ZoneRecord{
 		{
-			Name:    "",
+			Name:    "train0",
+			Type:    "CNAME",
+			Content: "train1.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "train1",
+			Type:    "CNAME",
+			Content: "train2.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "train2",
+			Type:    "ALIAS",
+			Content: "train3.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "train3",
+			Type:    "CNAME",
+			Content: "train4.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "train4",
 			Type:    "ALIAS",
 			Content: "example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "",
+			Type:    "A",
+			Content: "5.5.5.5",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "",
+			Type:    "AAAA",
+			Content: "2001:db8:85a3::8a2e:370:7335",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "external-alias",
+			Type:    "ALIAS",
+			Content: "lvh.me.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "internal-alias",
+			Type:    "ALIAS",
+			Content: "record.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "internal-alias-a-only",
+			Type:    "ALIAS",
+			Content: "a-only.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "internal-alias-aaaa-only",
+			Type:    "ALIAS",
+			Content: "aaaa-only.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "internal-alias-no-data",
+			Type:    "ALIAS",
+			Content: "does-not-exist.example.org.",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "a-only",
+			Type:    "A",
+			Content: "2.2.2.2",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
@@ -43,6 +133,20 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 			Name:    "record",
 			Type:    "A",
 			Content: "1.2.3.4",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "record",
+			Type:    "A",
+			Content: "1.2.3.5",
+			TTL:     300,
+			Regions: []string{"global", "AMS"},
+		},
+		{
+			Name:    "aaaa-only",
+			Type:    "AAAA",
+			Content: "2001:db8:85a3::8a2e:370:7336",
 			TTL:     300,
 			Regions: []string{"global", "AMS"},
 		},
@@ -163,25 +267,29 @@ func TestDNSimple(t *testing.T) {
 		wantNS       []string
 		expectedErr  error
 	}{
-		// 0. example.org ALIAS -> A found - success.
+		// example.org NODATA.
 		{
 			qname:      "example.org",
-			qtype:      dns.TypeA,
-			wantAnswer: []string{"example.org.	300	IN	A	93.184.216.34"},
+			qtype:      dns.TypeTXT,
+			wantAnswer: []string{},
+			wantNS:     []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
 		},
-		// 1. record.example.org A found - success.
+		// record.example.org A found - success.
 		{
-			qname:      "record.example.org",
-			qtype:      dns.TypeA,
-			wantAnswer: []string{"record.example.org.	300	IN	A	1.2.3.4"},
+			qname: "record.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"record.example.org.	300	IN	A	1.2.3.4",
+				"record.example.org.	300	IN	A	1.2.3.5",
+			},
 		},
-		// 2. record.example.org AAAA found - success.
+		// record.example.org AAAA found - success.
 		{
 			qname:      "record.example.org",
 			qtype:      dns.TypeAAAA,
 			wantAnswer: []string{"record.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
 		},
-		// 3. www.example.org points to example.org CNAME.
+		// www.example.org points to example.org CNAME.
 		// Query must return both CNAME and A records.
 		{
 			qname: "cname.example.org",
@@ -189,9 +297,10 @@ func TestDNSimple(t *testing.T) {
 			wantAnswer: []string{
 				"cname.example.org.	300	IN	CNAME	record.example.org.",
 				"record.example.org.	300	IN	A	1.2.3.4",
+				"record.example.org.	300	IN	A	1.2.3.5",
 			},
 		},
-		// 4. Region not configured. Return SOA record.
+		// Region not configured. Return SOA record.
 		{
 			qname:        "another-region.example.org",
 			qtype:        dns.TypeA,
@@ -199,7 +308,7 @@ func TestDNSimple(t *testing.T) {
 			wantMsgRCode: dns.RcodeNameError,
 			wantNS:       []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
 		},
-		// 5. POOL record.
+		// POOL record.
 		{
 			qname:       "pool.example.org",
 			qtype:       dns.TypeCNAME,
@@ -209,7 +318,7 @@ func TestDNSimple(t *testing.T) {
 				"pool.example.org.	300	IN	CNAME	b.pool.example.com.",
 			},
 		},
-		// 6. SRV record.
+		// SRV record.
 		{
 			qname: "srv.example.org",
 			qtype: dns.TypeSRV,
@@ -217,7 +326,7 @@ func TestDNSimple(t *testing.T) {
 				"srv.example.org.	300	IN	SRV	0 5 5060 sipserver.example.com.",
 			},
 		},
-		// 7. URL record.
+		// URL record.
 		{
 			qname: "url.example.org",
 			qtype: dns.TypeA,
@@ -225,6 +334,91 @@ func TestDNSimple(t *testing.T) {
 				"url.example.org.	300	IN	A	3.12.205.86",
 				"url.example.org.	300	IN	A	3.13.31.214",
 				"url.example.org.	300	IN	A	52.15.124.193",
+			},
+		},
+		// ALIAS record with internal target. A found - success.
+		{
+			qname:       "internal-alias.example.org",
+			qtype:       dns.TypeA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer: []string{
+				"internal-alias.example.org.	300	IN	A	1.2.3.4",
+				"internal-alias.example.org.	300	IN	A	1.2.3.5",
+			},
+		},
+		// ALIAS record with internal target. AAAA found - success.
+		{
+			qname:       "internal-alias.example.org",
+			qtype:       dns.TypeAAAA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{"internal-alias.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7334"},
+		},
+		// ALIAS record with internal target. TXT - NODATA.
+		{
+			qname:       "internal-alias.example.org",
+			qtype:       dns.TypeTXT,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with internal target. AAAA - NODATA.
+		{
+			qname:       "internal-alias-a-only.example.org",
+			qtype:       dns.TypeAAAA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with internal target. A - NODATA.
+		{
+			qname:       "internal-alias-aaaa-only.example.org",
+			qtype:       dns.TypeA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with internal target. AAAA - NODATA.
+		{
+			qname:       "internal-alias-no-data.example.org",
+			qtype:       dns.TypeAAAA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with internal target. A - NODATA.
+		{
+			qname:       "internal-alias-no-data.example.org",
+			qtype:       dns.TypeA,
+			wantRetCode: dns.RcodeSuccess,
+			wantAnswer:  []string{},
+			wantNS:      []string{"example.org.	3600	IN	SOA	ns1.dnsimple.com. admin.dnsimple.com. 1589573370 86400 7200 604800 300"},
+		},
+		// ALIAS record with external target. A found - success.
+		{
+			qname: "external-alias.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"external-alias.example.org.	300	IN	A	127.0.0.1",
+			},
+		},
+		// CNAME with ALIAS and CNAME targets inside zone. A found - success.
+		{
+			qname: "train0.example.org",
+			qtype: dns.TypeA,
+			wantAnswer: []string{
+				"train0.example.org.	300	IN	CNAME	train1.example.org.",
+				"train1.example.org.	300	IN	CNAME	train2.example.org.",
+				"train2.example.org.	300	IN	A	5.5.5.5",
+			},
+		},
+		// CNAME with ALIAS and CNAME targets inside zone. AAAA found - success.
+		{
+			qname: "train0.example.org",
+			qtype: dns.TypeAAAA,
+			wantAnswer: []string{
+				"train0.example.org.	300	IN	CNAME	train1.example.org.",
+				"train1.example.org.	300	IN	CNAME	train2.example.org.",
+				"train2.example.org.	300	IN	AAAA	2001:db8:85a3::8a2e:370:7335",
 			},
 		},
 	}
@@ -236,9 +430,23 @@ func TestDNSimple(t *testing.T) {
 		rec := dnstest.NewRecorder(&test.ResponseWriter{})
 		code, err := r.ServeDNS(ctx, rec, req)
 
-		assert.Equal(t, tc.expectedErr, err, "Test %d: Expected error %v, but got %v", ti, tc.expectedErr, err)
-		assert.Equal(t, int(tc.wantRetCode), code, "Test %d: Expected returned status code %s, but got %s", ti, dns.RcodeToString[tc.wantRetCode], dns.RcodeToString[code])
-		assert.Equal(t, tc.wantMsgRCode, rec.Msg.Rcode, "Test %d: Unexpected msg status code. Want: %s, got: %s", ti, dns.RcodeToString[tc.wantMsgRCode], dns.RcodeToString[rec.Msg.Rcode])
+		if tc.expectedErr != nil {
+			assert.Equal(t, tc.expectedErr, err, "Test %d: Expected error %v, but got %v", ti, tc.expectedErr, err)
+		}
+		assert.Nilf(t, err, "Test %d: Unexpected error %v", ti, err)
+
+		// Return code 0 means NODATA.
+		if !assert.Equal(
+			t,
+			int(tc.wantRetCode),
+			code,
+			"Test %d: Expected returned status code %s, but got %s.",
+			ti,
+			dns.RcodeToString[tc.wantRetCode],
+			dns.RcodeToString[code],
+		) {
+			continue
+		}
 
 		// Handle POOL tests.
 		if tc.wantPool != nil {
@@ -256,13 +464,21 @@ func TestDNSimple(t *testing.T) {
 			}
 		} else {
 			msgAnswers := make([]string, 0)
+			assert.NotNilf(t, rec.Msg, "Test %d: Unexpected Msg was nil.", ti)
+
 			for _, a := range rec.Msg.Answer {
 				msgAnswers = append(msgAnswers, a.String())
 			}
-			assert.ElementsMatch(t, msgAnswers, tc.wantAnswer)
+			assert.ElementsMatchf(
+				t,
+				msgAnswers,
+				tc.wantAnswer,
+				"Test for (%s, %s): Unexpected answer.", tc.qname, dns.TypeToString[tc.qtype])
 		}
 
-		assert.Len(t, rec.Msg.Ns, len(tc.wantNS), "Test %d: Unexpected NS number. Want: %d, got: %d", ti, len(tc.wantNS), len(rec.Msg.Ns))
+		if !assert.Len(t, rec.Msg.Ns, len(tc.wantNS), "Test for (%s, %s): Unexpected NS number. Want: %d, got: %d", tc.qname, dns.TypeToString[tc.qtype], len(tc.wantNS), len(rec.Msg.Ns)) {
+			continue
+		}
 		for i, ns := range rec.Msg.Ns {
 			got, ok := ns.(*dns.SOA)
 			assert.True(t, ok, "Test %d: Unexpected NS type. Want: SOA, got: %v", ti, reflect.TypeOf(got))
