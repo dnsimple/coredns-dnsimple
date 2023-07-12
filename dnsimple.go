@@ -233,6 +233,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 			h.dnsResolver,
 			regionalZone,
 			r.Question[0].Qtype,
+			&msg.Ns,
 			&msg.Answer,
 			&result,
 		)
@@ -301,7 +302,7 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 // We know that if we see an A record with a value of 255.255.255.255 and its name exists in the `aliases` map, there are two possibilities:
 // - It's a dummy record for ALIAS, and we need to replace it with all resolved ALIAS target records. For example, if a zone has two ALIAS records for `my.com`, one pointing to `a1.com` and another pointing to `a2.com`, it's expected that resolving `my.com` returns all A/AAAA records for both `a1.com` *and* `a2.com`.
 // - It's a real A record whose actual value is 255.255.255.255 and coincidentally exists alongside one or more ALIAS records with the same name. This is handled by the hash set and why it's necessary.
-func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype uint16, answers *[]dns.RR, result *file.Result) {
+func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype uint16, ns *[]dns.RR, answers *[]dns.RR, result *file.Result) {
 	newAnswers := make([]dns.RR, 0)
 	alreadyResolvedAliasesFor := make(map[string]bool)
 	maybeInterceptAnswer := func(ip net.IP, dummyIp net.IP, name string, ttl uint32) bool {
@@ -418,7 +419,13 @@ func maybeInterceptAliasResponse(dnsResolver *net.Resolver, zone *zone, qtype ui
 
 		newAnswers = append(newAnswers, ans)
 	}
+
 	*answers = newAnswers
+
+	if len(*answers) == 0 && len(*ns) == 0 && zone.zone.SOA != nil {
+		*ns = append(*ns, zone.zone.SOA)
+		*result = file.NoData
+	}
 }
 
 func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
