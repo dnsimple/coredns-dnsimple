@@ -95,6 +95,11 @@ func setup(c *caddy.Controller) error {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
 				opts.accountId = c.Val()
+			case "base_url":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				baseUrl = c.Val()
 			case "custom_dns_resolver":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
@@ -134,11 +139,6 @@ func setup(c *caddy.Controller) error {
 				if opts.refresh <= 60 {
 					return plugin.Error("dnsimple", c.Errf("refresh interval must be greater than 60 seconds: %q", refreshStr))
 				}
-			case "base_url":
-				if !c.NextArg() {
-					return plugin.Error("dnsimple", c.ArgErr())
-				}
-				baseUrl = c.Val()
 			default:
 				return plugin.Error("dnsimple", c.Errf("unknown property %q", c.Val()))
 			}
@@ -150,13 +150,13 @@ func setup(c *caddy.Controller) error {
 			accessToken = os.Getenv("DNSIMPLE_TOKEN")
 		}
 
+		if opts.accountId == "" {
+			opts.accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
+		}
+
 		if baseUrl == "" {
 			// Default to production
 			baseUrl = "https://api.dnsimple.com"
-		}
-
-		if opts.accountId == "" {
-			opts.accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
 		}
 
 		if opts.identifier == "" {
