@@ -37,7 +37,7 @@ type Options struct {
 var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl string) (dnsimpleService, error) {
 	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, accessToken))
 	client.BaseURL = baseUrl
-	client.SetUserAgent(defaultUserAgent)
+	client.SetUserAgent(defaultUserAgent + "/" + PluginVersion)
 	return dnsimpleClient{client}, nil
 }
 
@@ -168,7 +168,7 @@ func setup(c *caddy.Controller) error {
 			opts.refresh = time.Duration(1) * time.Minute
 		}
 
-		opts.apiCaller = createDNSimpleApiCaller(baseUrl, accessToken, defaultUserAgent)
+		opts.apiCaller = createDNSimpleApiCaller(baseUrl, accessToken, defaultUserAgent+"/"+PluginVersion)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		client, err := newDnsimpleService(ctx, accessToken, baseUrl)
