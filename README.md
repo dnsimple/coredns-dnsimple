@@ -112,7 +112,7 @@ An access token is needed in order to call the DNSimple API. To learn more about
 
 ## Regional records
 
-Support for [regional records](https://support.dnsimple.com/articles/regional-records/) is prvoided when defining a zone with matching regional records in the Corefile. All global and regional records for any defined zone with a region will be synced. If no region is defined, only global records will be synced for the zone.
+Support for [regional records](https://support.dnsimple.com/articles/regional-records/) is provided when defining a zone with matching regional records in the Corefile. All global and regional records for any defined zone with a region will be synced. If no region is defined, only global records will be synced for the zone.
 
 Mutliple regions may be defined for the same zone. In the following example: 
   - A regional record that exists in CDG will be returned if no regional record exists in AMS for the same name. 
