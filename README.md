@@ -114,14 +114,15 @@ An access token is needed in order to call the DNSimple API. To learn more about
 
 Support for [regional records](https://support.dnsimple.com/articles/regional-records/) is provided when defining a zone with matching regional records in the Corefile. All global and regional records for any defined zone with a region will be synced. If no region is defined, only global records will be synced for the zone.
 
-Mutliple regions may be defined for the same zone. In the following example: 
-  - A regional record that exists in CDG will be returned if no regional record exists in AMS for the same name. 
-  - A regional record that exists in FRA will be returned if no regional record exists in AMS or CDG for the same name.
-
-Enable dnsimple with multiple regions for the some zone:
+Multiple regions may be defined for the same zone; when multiple zones have conflicting records, the zone that is declared earlier in the Corefile wins. For example, given the following configuration:
 
 ```
 example.org {
   dnsimple example.org:AMS example.org:CDG example.org:FRA
 }
 ```
+
+The following rules apply:
+
+- A regional record that exists in CDG will be returned if no regional record exists in AMS for the same name.
+- A regional record that exists in FRA will be returned if no regional record exists in AMS or CDG for the same name.
