@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -35,7 +37,23 @@ type Options struct {
 
 // exposed for testing
 var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl string) (dnsimpleService, error) {
-	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, accessToken))
+	httpClient := dnsimple.StaticTokenHTTPClient(ctx, accessToken)
+	// Use a different resolver for all HTTP requests (not just our client) in case our system resovler is set to this server and CoreDNS hasn't started listening on the port yet by the time we make our first fetch.
+	dialer := &net.Dialer{
+		Resolver: &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{
+					Timeout: time.Second * 5,
+				}
+				return d.DialContext(ctx, network, "1.1.1.1:53")
+			},
+		},
+	}
+	http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, addr)
+	}
+	client := dnsimple.NewClient(httpClient)
 	client.BaseURL = baseUrl
 	client.SetUserAgent(defaultUserAgent + "/" + PluginVersion)
 	return dnsimpleClient{client}, nil
