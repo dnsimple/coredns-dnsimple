@@ -54,7 +54,7 @@ var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl s
 	// `StaticTokenHTTPClient` calls `oauth2.NewClient`
 	// which returns a `http.Client` with the field `Transport`
 	// set to a `oauth2.Transport`, which has a `Base` field
-  // set to `oauth2.internal.ContextClient(...).Transport`
+	// set to `oauth2.internal.ContextClient(...).Transport`
 	// which evaluates to a type equivalent to `http.Client{}.Transport`.
 	httpClient.Transport.(*oauth2.Transport).Base.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return dialer.DialContext(ctx, network, addr)
