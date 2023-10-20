@@ -50,7 +50,7 @@ var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl s
 			},
 		},
 	}
-	http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	httpClient.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return dialer.DialContext(ctx, network, addr)
 	}
 	client := dnsimple.NewClient(httpClient)

@@ -87,13 +87,29 @@ func createDNSimpleApiCaller(baseUrl string, accessToken string, userAgent strin
 	return func(path string, body []byte) error {
 		url := fmt.Sprintf("%s%s", baseUrl, path)
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+		// See `newDnsimpleService` function for rationale.
+		dialer := &net.Dialer{
+			Resolver: &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+					d := net.Dialer{
+						Timeout: time.Second * 5,
+					}
+					return d.DialContext(ctx, network, "1.1.1.1:53")
+				},
+			},
+		}
+		client := http.Client{}
+		client.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		}
 		if err != nil {
 			return err
 		}
 		req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("user-agent", userAgent)
-		res, err := http.DefaultClient.Do(req)
+		res, err := client.Do(req)
 		if err != nil {
 			return err
 		}
