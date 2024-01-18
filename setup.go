@@ -30,20 +30,20 @@ type Options struct {
 	accountId         string
 	accessToken       string
 	apiCaller         DNSimpleApiCaller
-	customDnsResolver string
-	clientDnsResolver string
+	customDNSResolver string
+	clientDNSResolver string
 	identifier        string
 	maxRetries        int
 	refresh           time.Duration
-	customHttpDialer  func(ctx context.Context, network, address string) (net.Conn, error)
+	customHTTPDialer  func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // exposed for testing
 var newDnsimpleService = func(ctx context.Context, options Options, accessToken string, baseUrl string) (dnsimpleService, error) {
 	httpClient := dnsimple.StaticTokenHTTPClient(ctx, accessToken)
 
-	if options.clientDnsResolver != "" {
-		httpClient.Transport.(*oauth2.Transport).Base.(*http.Transport).DialContext = options.customHttpDialer
+	if options.clientDNSResolver != "" {
+		httpClient.Transport.(*oauth2.Transport).Base.(*http.Transport).DialContext = options.customHTTPDialer
 	}
 	client := dnsimple.NewClient(httpClient)
 	client.BaseURL = baseUrl
@@ -113,12 +113,12 @@ func setup(c *caddy.Controller) error {
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				opts.customDnsResolver = c.Val()
+				opts.customDNSResolver = c.Val()
 			case "client_dns_resolver":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				opts.clientDnsResolver = c.Val()
+				opts.clientDNSResolver = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
 			case "identifier":
@@ -182,7 +182,7 @@ func setup(c *caddy.Controller) error {
 			opts.refresh = time.Duration(1) * time.Minute
 		}
 
-		if opts.clientDnsResolver == "" {
+		if opts.clientDNSResolver == "" {
 			dialer := &net.Dialer{
 				Resolver: &net.Resolver{
 					PreferGo: true,
@@ -190,16 +190,16 @@ func setup(c *caddy.Controller) error {
 						d := net.Dialer{
 							Timeout: time.Second * 5,
 						}
-						return d.DialContext(ctx, network, opts.clientDnsResolver)
+						return d.DialContext(ctx, network, opts.clientDNSResolver)
 					},
 				},
 			}
-			opts.customHttpDialer = func(ctx context.Context, network, address string) (net.Conn, error) {
+			opts.customHTTPDialer = func(ctx context.Context, network, address string) (net.Conn, error) {
 				return dialer.DialContext(ctx, network, address)
 			}
 		}
 
-		opts.apiCaller = createDNSimpleApiCaller(opts, baseUrl, accessToken, defaultUserAgent+"/"+PluginVersion)
+		opts.apiCaller = createDNSimpleAPICaller(opts, baseUrl, accessToken, defaultUserAgent+"/"+PluginVersion)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		client, err := newDnsimpleService(ctx, opts, accessToken, baseUrl)
