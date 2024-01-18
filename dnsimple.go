@@ -83,29 +83,19 @@ func (g *nameGraph) insertName(name string, value string) {
 
 type DNSimpleApiCaller func(path string, body []byte) error
 
-func createDNSimpleApiCaller(baseUrl string, accessToken string, userAgent string) DNSimpleApiCaller {
+func createDNSimpleApiCaller(options Options, baseUrl string, accessToken string, userAgent string) DNSimpleApiCaller {
 	return func(path string, body []byte) error {
 		url := fmt.Sprintf("%s%s", baseUrl, path)
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
-		// See `newDnsimpleService` function for rationale.
-		dialer := &net.Dialer{
-			Resolver: &net.Resolver{
-				PreferGo: true,
-				Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-					d := net.Dialer{
-						Timeout: time.Second * 5,
-					}
-					return d.DialContext(ctx, network, "1.1.1.1:53")
-				},
-			},
-		}
-		client := http.Client{}
-		client.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, addr)
-		}
 		if err != nil {
 			return err
 		}
+
+		client := http.Client{}
+		if options.clientDnsResolver != "" {
+			client.Transport.(*http.Transport).DialContext = options.customHttpDialer
+		}
+
 		req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("user-agent", userAgent)
