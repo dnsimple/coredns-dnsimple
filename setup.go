@@ -148,16 +148,18 @@ func setup(c *caddy.Controller) error {
 		if accessToken == "" {
 			// Keep this environment variable name consistent across all our integrations (e.g. SDKs, Terraform provider).
 			accessToken = os.Getenv("DNSIMPLE_TOKEN")
-			if accessToken == "" {
-				return plugin.Error("dnsimple", c.Err("access token must be provided via the Corefile or DNSIMPLE_TOKEN environment variable"))
-			}
+		}
+		// Still blank, return error
+		if accessToken == "" {
+			return plugin.Error("dnsimple", c.Err("access token must be provided via the Corefile or DNSIMPLE_TOKEN environment variable"))
 		}
 
 		if opts.accountId == "" {
 			opts.accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
-			if opts.accountId == "" {
-				return plugin.Error("dnsimple", c.Err("account ID must be provided via the Corefile or DNSIMPLE_TOKEN environment variable"))
-			}
+		}
+		// Still blank, return error
+		if opts.accountId == "" {
+			return plugin.Error("dnsimple", c.Err("account ID must be provided via the Corefile or DNSIMPLE_TOKEN environment variable"))
 		}
 
 		if baseUrl == "" {
