@@ -83,17 +83,29 @@ func (g *nameGraph) insertName(name string, value string) {
 
 type DNSimpleApiCaller func(path string, body []byte) error
 
-func createDNSimpleApiCaller(baseUrl string, accessToken string, userAgent string) DNSimpleApiCaller {
+func createDNSimpleAPICaller(options Options, baseURL string, accessToken string, userAgent string) DNSimpleApiCaller {
 	return func(path string, body []byte) error {
-		url := fmt.Sprintf("%s%s", baseUrl, path)
+		url := fmt.Sprintf("%s%s", baseURL, path)
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 		if err != nil {
 			return err
 		}
+
+		client := http.Client{}
+		if options.clientDNSResolver != "" {
+			if client.Transport != nil {
+				client.Transport.(*http.Transport).DialContext = options.customHTTPDialer
+			} else {
+				transport := http.DefaultTransport.(*http.Transport).Clone()
+				transport.DialContext = options.customHTTPDialer
+				client.Transport = transport
+			}
+		}
+
 		req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("user-agent", userAgent)
-		res, err := http.DefaultClient.Do(req)
+		res, err := client.Do(req)
 		if err != nil {
 			return err
 		}
@@ -160,14 +172,14 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 		}
 	}
 	dnsResolver := net.DefaultResolver
-	if opts.customDnsResolver != "" {
+	if opts.customDNSResolver != "" {
 		dnsResolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 				d := net.Dialer{
 					Timeout: time.Second * 10,
 				}
-				return d.DialContext(ctx, network, opts.customDnsResolver)
+				return d.DialContext(ctx, network, opts.customDNSResolver)
 			},
 		}
 	}
