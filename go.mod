@@ -8,6 +8,7 @@ require (
 	github.com/dnsimple/dnsimple-go v1.2.0
 	github.com/miekg/dns v1.1.55
 	github.com/stretchr/testify v1.8.4
+	golang.org/x/oauth2 v0.4.0
 )
 
 require (
@@ -30,7 +31,6 @@ require (
 	github.com/stretchr/objx v0.5.0 // indirect
 	golang.org/x/mod v0.7.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
-	golang.org/x/oauth2 v0.4.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
 	golang.org/x/tools v0.4.0 // indirect
