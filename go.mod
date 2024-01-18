@@ -8,7 +8,7 @@ require (
 	github.com/dnsimple/dnsimple-go v1.5.1
 	github.com/miekg/dns v1.1.58
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/oauth2 v0.14.0
+	golang.org/x/oauth2 v0.16.0
 )
 
 require (
