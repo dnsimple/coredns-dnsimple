@@ -43,7 +43,13 @@ var newDnsimpleService = func(ctx context.Context, options Options, accessToken 
 	httpClient := dnsimple.StaticTokenHTTPClient(ctx, accessToken)
 
 	if options.clientDNSResolver != "" {
-		httpClient.Transport.(*oauth2.Transport).Base.(*http.Transport).DialContext = options.customHTTPDialer
+		if httpClient.Transport.(*oauth2.Transport).Base != nil {
+			httpClient.Transport.(*oauth2.Transport).Base.(*http.Transport).DialContext = options.customHTTPDialer
+		} else {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.DialContext = options.customHTTPDialer
+			httpClient.Transport.(*oauth2.Transport).Base = transport
+		}
 	}
 	client := dnsimple.NewClient(httpClient)
 	client.BaseURL = baseUrl

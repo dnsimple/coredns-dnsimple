@@ -93,7 +93,13 @@ func createDNSimpleAPICaller(options Options, baseURL string, accessToken string
 
 		client := http.Client{}
 		if options.clientDNSResolver != "" {
-			client.Transport.(*http.Transport).DialContext = options.customHTTPDialer
+			if client.Transport != nil {
+				client.Transport.(*http.Transport).DialContext = options.customHTTPDialer
+			} else {
+				transport := http.DefaultTransport.(*http.Transport).Clone()
+				transport.DialContext = options.customHTTPDialer
+				client.Transport = transport
+			}
 		}
 
 		req.Header.Set("authorization", fmt.Sprintf("Bearer %s", accessToken))
