@@ -16,6 +16,7 @@ dnsimple ZONE[:REGION ZONE ...] {
     account_id            DNSIMPLE_ACCOUNT_ID
     base_url              STRING
     custom_dns_resolver   ADDRESS
+    client_dns_resolver   ADDRESS
     fallthrough           [ZONES...]
     identifier            STRING
     max_retries           MAX_RETRIES
@@ -28,8 +29,9 @@ dnsimple ZONE[:REGION ZONE ...] {
 - `account_id`: The account ID containing the configured zones. If it's not provided, the environment variable `DNSIMPLE_ACCOUNT_ID` will be used.
 - `base_url`: The base url for interacting with the DNSimple API. If no value is provided the production environment is used. See [DNSimple Sandbox API](https://support.dnsimple.com/articles/sandbox/) for sandbox environment testing.
 - `custom_dns_resolver`: Optionally override the DNS resolver to use for resolving ALIAS records. By default, the system resolver is used. See the [ALIAS records](#alias-records) section for more details.
+- `client_dns_resolver`: Optionally provide a DNS resolver to use for resolving DNSimple API endpoints. By default, the system resolver is used. This is useful when running CoreDNS as the DNS resolver for the host. Format is `ADDRESS:PORT`.
 - `fallthrough`: If a query matches the zone(s) but no response message can be generated, the query will be passed to the next plugin in the chain. To restrict passing only for specific zones, list them here; all other zone queries will **not** "fall through".
-- `identifer`: Optionally set the CoreDNS instance identifer string. This is used to report the sync status of the zone to the DNSimple application. If no identifier is provided, "default" is used.
+- `identifier`: Optionally set the CoreDNS instance identifier string. This is used to report the sync status of the zone to the DNSimple application. If no identifier is provided, "default" is used.
 - `max_retries`: Maximum retry attempts to fetch zones using the DNSimple API. Must be greater than zero. Defaults to 3.
 - `refresh`: The interval to refresh zones at. It must be a valid duration, and defaults to `1m`.
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/coredns/coredns/plugin/pkg/fall"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/dnsimple/dnsimple-go/dnsimple"
+	"golang.org/x/oauth2"
 )
 
 var log = clog.NewWithPlugin("dnsimple")
@@ -27,15 +30,28 @@ type Options struct {
 	accountId         string
 	accessToken       string
 	apiCaller         DNSimpleApiCaller
-	customDnsResolver string
+	customDNSResolver string
+	clientDNSResolver string
 	identifier        string
 	maxRetries        int
 	refresh           time.Duration
+	customHTTPDialer  func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // exposed for testing
-var newDnsimpleService = func(ctx context.Context, accessToken string, baseUrl string) (dnsimpleService, error) {
-	client := dnsimple.NewClient(dnsimple.StaticTokenHTTPClient(ctx, accessToken))
+var newDnsimpleService = func(ctx context.Context, options Options, accessToken string, baseUrl string) (dnsimpleService, error) {
+	httpClient := dnsimple.StaticTokenHTTPClient(ctx, accessToken)
+
+	if options.clientDNSResolver != "" {
+		if httpClient.Transport.(*oauth2.Transport).Base != nil {
+			httpClient.Transport.(*oauth2.Transport).Base.(*http.Transport).DialContext = options.customHTTPDialer
+		} else {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.DialContext = options.customHTTPDialer
+			httpClient.Transport.(*oauth2.Transport).Base = transport
+		}
+	}
+	client := dnsimple.NewClient(httpClient)
 	client.BaseURL = baseUrl
 	client.SetUserAgent(defaultUserAgent + "/" + PluginVersion)
 	return dnsimpleClient{client}, nil
@@ -75,7 +91,6 @@ func setup(c *caddy.Controller) error {
 			keys[zone] = append(keys[zone], region)
 		}
 
-		// TODO: set to warn when no zones are defined
 		if len(keys) == 0 {
 			return plugin.Error("dnsimple", c.Errf("no zone(s) specified"))
 		}
@@ -104,7 +119,12 @@ func setup(c *caddy.Controller) error {
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				opts.customDnsResolver = c.Val()
+				opts.customDNSResolver = c.Val()
+			case "client_dns_resolver":
+				if !c.NextArg() {
+					return plugin.Error("dnsimple", c.ArgErr())
+				}
+				opts.clientDNSResolver = c.Val()
 			case "fallthrough":
 				fall.SetZonesFromArgs(c.RemainingArgs())
 			case "identifier":
@@ -176,10 +196,27 @@ func setup(c *caddy.Controller) error {
 			opts.refresh = time.Duration(1) * time.Minute
 		}
 
-		opts.apiCaller = createDNSimpleApiCaller(baseUrl, accessToken, defaultUserAgent+"/"+PluginVersion)
+		if opts.clientDNSResolver == "" {
+			dialer := &net.Dialer{
+				Resolver: &net.Resolver{
+					PreferGo: true,
+					Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+						d := net.Dialer{
+							Timeout: time.Second * 5,
+						}
+						return d.DialContext(ctx, network, opts.clientDNSResolver)
+					},
+				},
+			}
+			opts.customHTTPDialer = func(ctx context.Context, network, address string) (net.Conn, error) {
+				return dialer.DialContext(ctx, network, address)
+			}
+		}
+
+		opts.apiCaller = createDNSimpleAPICaller(opts, baseUrl, accessToken, defaultUserAgent+"/"+PluginVersion)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client, err := newDnsimpleService(ctx, accessToken, baseUrl)
+		client, err := newDnsimpleService(ctx, opts, accessToken, baseUrl)
 		if err != nil {
 			cancel()
 			return err

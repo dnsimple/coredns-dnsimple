@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for tests to succeed
-        uses: lewagon/wait-on-check-action@v1.3.1
+        uses: lewagon/wait-on-check-action@v1.3.3
         with:
           ref: 'refs/heads/main'
           check-name: 'Run tests'
@@ -22,22 +22,22 @@ jobs:
           allowed-conclusions: success
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
 
@@ -56,7 +56,7 @@ jobs:
           rm .dockerignore
 
       - name: Build and push
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: ./coredns
           file: ./coredns/Dockerfile.release
@@ -65,16 +65,3 @@ jobs:
           tags: |
             dnsimple/coredns:latest
             dnsimple/coredns:${{ github.ref_name }}
-
-  slack-workflow-status:
-    if: always()
-    name: Post Workflow Status To Slack
-    needs:
-      - docker
-    runs-on: ubuntu-latest
-    steps:
-      - name: Slack Workflow Notification
-        uses: Gamesight/slack-workflow-status@master
-        with:
-          repo_token: ${{secrets.GITHUB_TOKEN}}
-          slack_webhook_url: ${{secrets.SLACK_WEBHOOK_URL_DEVELOPMENT}}

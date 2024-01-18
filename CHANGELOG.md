@@ -2,6 +2,10 @@
 
 ## main
 
+FEATURES:
+
+- The plugin now supports the setting of `client_dns_resolver` to override the DNS resolver used for DNSimple API endpoints. This is useful when running CoreDNS as the DNS resolver for the host. Format is `ADDRESS:PORT`. (#25)
+
 ## 1.0.0-rc.1
 
 FEATURES:
