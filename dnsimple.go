@@ -83,9 +83,9 @@ func (g *nameGraph) insertName(name string, value string) {
 
 type DNSimpleApiCaller func(path string, body []byte) error
 
-func createDNSimpleAPICaller(options Options, baseUrl string, accessToken string, userAgent string) DNSimpleApiCaller {
+func createDNSimpleAPICaller(options Options, baseURL string, accessToken string, userAgent string) DNSimpleApiCaller {
 	return func(path string, body []byte) error {
-		url := fmt.Sprintf("%s%s", baseUrl, path)
+		url := fmt.Sprintf("%s%s", baseURL, path)
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 		if err != nil {
 			return err
