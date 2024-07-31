@@ -33,8 +33,6 @@ jobs:
         with:
           version: latest
           only-new-issues: true
-          skip-pkg-cache: true
-          skip-build-cache: true
 
   test:
     name: Run tests
