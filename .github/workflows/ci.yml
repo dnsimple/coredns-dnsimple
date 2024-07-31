@@ -26,8 +26,6 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - run: go mod tidy
-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v5
         with:
@@ -45,8 +43,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-
-      - run: go mod tidy
 
       - name: Test
         run: make test
