@@ -21,10 +21,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Read .tool-versions
+        uses: marocchino/tool-versions-action@v1
+        id: versions
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version: "${{ steps.versions.outputs.golang }}"
           cache: true
+
+      - run: go mod tidy
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v5
@@ -39,10 +45,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read .tool-versions
+        uses: marocchino/tool-versions-action@v1
+        id: versions
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version: "${{ steps.versions.outputs.golang }}"
+          cache: true
+
+      - run: go mod tidy
 
       - name: Test
         run: make test

@@ -12,10 +12,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - name: Read .tool-versions
+      uses: marocchino/tool-versions-action@v1
+      id: versions
+
+    - uses: actions/setup-go@v5
       with:
-        go-version-file: 'go.mod'
+        go-version: "${{ steps.versions.outputs.golang }}"
+        cache: true
 
     - name: Build CoreDNS
       run: |
