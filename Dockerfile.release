@@ -19,7 +19,6 @@ RUN adduser \
 RUN apk update && \
   apk add --update git && \
   apk add --update make && \
-  apk add --update gcc6 && \
   apk add --update ca-certificates && \
   apk add --update libcap-dev && \
   apk add --update libcap
