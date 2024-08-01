@@ -2,6 +2,12 @@
 
 ## main
 
+## 1.2.0
+
+NOTES:
+
+This release fixes our docker image release process.
+
 ## 1.1.0
 
 NOTES:
