@@ -2,6 +2,13 @@
 
 ## main
 
+## 1.1.0
+
+NOTES:
+
+- This release bumps the go version to 1.21.
+- Dependency updates tracking the latest version of CoreDNS.
+
 ## 1.0.0
 
 FEATURES:
