@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ 'main' ]
+    branches: ['main']
   pull_request:
-    branches: [ 'main' ]
+    branches: ['main']
   workflow_dispatch:
 
 concurrency:
@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "${{ steps.versions.outputs.golang }}"
+          go-version: '${{ steps.versions.outputs.golang }}'
           cache: true
 
       - run: go mod tidy
@@ -52,7 +52,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "${{ steps.versions.outputs.golang }}"
+          go-version: '${{ steps.versions.outputs.golang }}'
           cache: true
 
       - run: go mod tidy
