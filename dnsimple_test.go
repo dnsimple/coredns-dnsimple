@@ -331,7 +331,7 @@ func TestDNSimple(t *testing.T) {
 			qname: "url.example.org",
 			qtype: dns.TypeA,
 			wantAnswer: []string{
-				"url.example.org.	300	IN	A	3.12.205.86",
+				"url.example.org.	300	IN	A	3.131.150.69",
 				"url.example.org.	300	IN	A	3.13.31.214",
 				"url.example.org.	300	IN	A	52.15.124.193",
 			},
