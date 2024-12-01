@@ -7,7 +7,7 @@ require (
 	github.com/coredns/coredns v1.11.3
 	github.com/dnsimple/dnsimple-go v1.7.0
 	github.com/miekg/dns v1.1.62
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	golang.org/x/oauth2 v0.23.0
 )
 
