@@ -1,6 +1,6 @@
-ARG GO_VERSION=1.21
+ARG GOLANG_VERSION=1.21
 
-FROM golang:${GO_VERSION}-alpine AS base
+FROM golang:${GOLANG_VERSION}-alpine AS base
 
 # Create appuser
 ENV USER=appuser

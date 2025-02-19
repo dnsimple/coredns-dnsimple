@@ -28,7 +28,7 @@ jobs:
         mkdir -p plugin/dnsimple
         cp ../*.go plugin/dnsimple
         cp ../go.mod plugin/dnsimple
-        sed -i "/^go ${{env.GO_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod
+        sed -i "/^go ${{env.GOLANG_VERSION}}/a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod
         sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
         GOFLAGS=-mod=mod go generate
         go mod tidy
