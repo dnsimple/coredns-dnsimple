@@ -1,14 +1,13 @@
 module github.com/dnsimple/coredns-dnsimple
 
 go 1.23
-
 require (
 	github.com/coredns/caddy v1.1.1
 	github.com/coredns/coredns v1.11.3
 	github.com/dnsimple/dnsimple-go v1.7.0
 	github.com/miekg/dns v1.1.62
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/oauth2 v0.23.0
+	golang.org/x/oauth2 v0.27.0
 )
 
 require (
