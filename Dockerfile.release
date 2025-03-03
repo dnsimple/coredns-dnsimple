@@ -1,4 +1,4 @@
-ARG GOLANG_VERSION=1.21
+ARG GOLANG_VERSION=1.23.4
 
 FROM golang:${GOLANG_VERSION}-alpine AS base
 
@@ -23,7 +23,7 @@ RUN apk update && \
   apk add --update libcap-dev && \
   apk add --update libcap
 
-ENV APP_HOME /app
+ENV APP_HOME=/app
 WORKDIR ${APP_HOME}
 
 COPY go.mod .
@@ -61,10 +61,12 @@ COPY --from=build /etc/group /etc/group
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
+COPY --from=build /app/docker-entrypoint.sh /
 COPY --from=build /app/build/coredns /
 
 EXPOSE 53 53/udp
 
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/coredns"]
 
 USER appuser
