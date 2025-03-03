@@ -48,8 +48,6 @@ build:
 		$(SED) -i "/^go 1/a replace github.com/dnsimple/coredns-dnsimple => $$PLUGIN_DIR" go.mod; \
 		$(SED) -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg; \
 	fi; \
-	GOFLAGS=-mod=mod go generate; \
-	go mod tidy; \
 	gitcommit=$(shell git describe --dirty --always); \
 	go build -o coredns -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$$gitcommit" .
 	@mkdir -p bin
@@ -57,8 +55,15 @@ build:
 
 .PHONY: docker-build
 docker-build:
+	@echo "Building Docker image"
+	pushd coredns; \
+	mkdir -p plugin/dnsimple; \
+	cp ../*.go plugin/dnsimple; \
+	cp ../go.mod plugin/dnsimple; \
+	cp ../Dockerfile.release Dockerfile; \
+	cp ../bin/_docker/docker-entrypoint.sh docker-entrypoint.sh; \
+	rm .dockerignore; \
 	docker build --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
-
 
 .PHONY: clean
 clean:
