@@ -8,6 +8,12 @@
 
 The dnsimple plugin is useful for serving zones defined in DNSimple. This plugin supports all [DNSimple record types](https://support.dnsimple.com/articles/supported-dns-records/), including [ALIAS](https://support.dnsimple.com/articles/alias-record/), [URL](https://support.dnsimple.com/articles/url-record/), [POOL](https://support.dnsimple.com/articles/pool-record/) and [regional records](https://support.dnsimple.com/articles/regional-records/).
 
+## Getting Started
+
+The easiest way to get started is to [run the application via a Docker image](DOCKER.md). You can run the latest version, individual versions, or a custom image. The application will run in a "production"-alike mode.
+
+Alternatively, if you want full control over the application, you can download the repository, setup the development environment along with all the dependencies and tooling, and run it from the source code. See [Contributing guidelines](CONTRIBUTING.md)
+
 ## Syntax
 
 ```
