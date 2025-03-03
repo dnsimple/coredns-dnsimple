@@ -6,6 +6,9 @@ on:
       - v*.*.*
   workflow_dispatch:
 
+env:
+  GOLANG_VERSION: '1.23.4'
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -65,7 +68,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            GOLANG_VERSION=${{ steps.versions.outputs.golang }}
+            GOLANG_VERSION=${{ env.GOLANG_VERSION }}
           tags: |
             dnsimple/coredns:latest
             dnsimple/coredns:${{ github.ref_name }}
