@@ -61,12 +61,12 @@ make start
 
 ## Releasing
 
-The following instructions uses `$VERSION` as a placeholder, where `$VERSION` is a `MAJOR.MINOR.BUGFIX` release such as `1.2.0`.
+The following instructions uses `$PACKAGER_VERSION` as a placeholder, where `$PACKAGER_VERSION` is a `MAJOR.MINOR.BUGFIX` release such as `1.2.0`.
 
 1. Set the version in `./version.go`:
 
     ```go
-    PluginVersion = "$VERSION"
+    PluginVersion = "$PACKAGER_VERSION"
     ```
 
 1. Run the test suite and ensure all the tests pass.
@@ -76,7 +76,7 @@ The following instructions uses `$VERSION` as a placeholder, where `$VERSION` is
 1. Commit and push the changes
 
     ```shell
-    git commit -a -m "Release $VERSION"
+    git commit -a -m "Release $PACKAGER_VERSION"
     git push origin main
     ```
 
@@ -85,5 +85,5 @@ The following instructions uses `$VERSION` as a placeholder, where `$VERSION` is
 1. Release the version.
 
     ```shell
-    make release VERSION=$VERSION
+    make release VERSION=$PACKAGER_VERSION
     ```
