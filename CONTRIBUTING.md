@@ -70,6 +70,11 @@ make docker-build
 PACKAGER_VERSION=dev make docker-build
 ```
 
+## Run with docker compose
+
+```shell
+COREDNS_DNSIMPLE_TAG=dev docker compose up
+```
 
 ## Releasing
 
