@@ -29,6 +29,7 @@ WORKDIR ${APP_HOME}
 COPY go.mod .
 COPY go.sum .
 COPY plugin/dnsimple/go.mod plugin/dnsimple/go.mod
+COPY docker-entrypoint.sh .
 
 RUN go mod download
 RUN go mod verify
@@ -39,11 +40,13 @@ RUN go mod verify
 FROM base AS build
 
 ARG GITCOMMIT
+ARG PACKAGER_VERSION=development
 
 COPY . .
 
 ENV CGO_ENABLED=0
 RUN go build \
+  -ldflags "-X main.Version=$(PACKAGER_VERSION)" \
   -ldflags "-X github.com/coredns/coredns/coremain.GitCommit=${GITCOMMIT}" \
   -o build/coredns
 
@@ -54,7 +57,7 @@ RUN setcap 'cap_net_bind_service=+ep' /app/build/coredns
 # ------------------------------------------------------------------------------
 # Production image
 # ------------------------------------------------------------------------------
-FROM scratch AS production
+FROM alpine:latest AS production
 
 COPY --from=build /etc/passwd /etc/passwd
 COPY --from=build /etc/group /etc/group
