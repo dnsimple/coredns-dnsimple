@@ -5,12 +5,17 @@ else
 	SED=sed -i
 endif
 
-
 PLUGIN_VERSION:=$(shell grep 'PluginVersion' ./version.go | awk '{ print $$3 }' | tr -d '"')
+
+ifdef PACKAGER_VERSION
+PKG_VERSION := $(PACKAGER_VERSION)
+else
+PKG_VERSION := $(PLUGIN_VERSION)
+endif
 
 .PHONY: version
 version:
-	@echo $(PLUGIN_VERSION)
+	@echo $(PKG_VERSION)
 
 .PHONY: lint
 lint: install-tools
@@ -47,16 +52,22 @@ build:
 	go mod tidy; \
 	gitcommit=$(shell git describe --dirty --always); \
 	go build -o coredns -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$$gitcommit" .
-	@cp coredns/coredns coredns-dnsimple
+	@mkdir -p bin
+	@cp coredns/coredns bin/coredns-dnsimple
+
+.PHONY: docker-build
+docker-build:
+	docker build --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
+
 
 .PHONY: clean
 clean:
 	rm -rf coredns
-	rm -f coredns-dnsimple
+	rm -f bin/coredns-dnsimple
 
 .PHONY: start
 start: build
-	./coredns-dnsimple -conf Corefile
+	./bin/coredns-dnsimple -conf Corefile
 
 .PHONY: release
 release: lint fmt test
