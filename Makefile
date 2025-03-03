@@ -44,6 +44,7 @@ build:
 	fi
 	@export PLUGIN_DIR=$(shell pwd); \
 	cd coredns; \
+	cat go.mod; \
 	if ! grep -q "replace github.com/dnsimple/coredns-dnsimple" go.mod; then \
 		$(SED) -i "/^go 1/a replace github.com/dnsimple/coredns-dnsimple => $$PLUGIN_DIR" go.mod; \
 		$(SED) -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg; \
@@ -56,14 +57,23 @@ build:
 .PHONY: docker-build
 docker-build:
 	@echo "Building Docker image"
-	pushd coredns; \
+	@if [ ! -d "coredns.docker" ]; then \
+		git clone https://github.com/coredns/coredns.git coredns.docker; \
+	fi
+	cd coredns.docker; \
+	if ! grep -q "replace github.com/dnsimple/coredns-dnsimple" go.mod; then \
+		$(SED) -i "/^go /a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod; \
+		$(SED) -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg; \
+	fi; \
 	mkdir -p plugin/dnsimple; \
 	cp ../*.go plugin/dnsimple; \
 	cp ../go.mod plugin/dnsimple; \
+	GOFLAGS=-mod=mod go generate; \
+	go mod tidy; \
 	cp ../Dockerfile.release Dockerfile; \
 	cp ../bin/_docker/docker-entrypoint.sh docker-entrypoint.sh; \
 	rm .dockerignore; \
-	docker build --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
+	docker build --no-cache --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
 
 .PHONY: clean
 clean:
