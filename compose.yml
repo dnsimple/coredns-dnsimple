@@ -1,0 +1,12 @@
+services:
+  coredns:
+    image: dnsimple/coredns:${COREDNS_DNSIMPLE_TAG:-latest}
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    volumes:
+      - ./Corefile:/Corefile:ro
+    environment:
+      - DNSIMPLE_TOKEN=${DNSIMPLE_TOKEN}
+      - DNSIMPLE_ACCOUNT=${DNSIMPLE_ACCOUNT}
+    restart: unless-stopped 
