@@ -58,6 +58,18 @@ make test
 make start
 ```
 
+## Building container locally (make build is a prerequisite)
+
+```shell
+make docker-build
+```
+
+## Building container with specific tag
+
+```shell
+PACKAGER_VERSION=dev make docker-build
+```
+
 
 ## Releasing
 
