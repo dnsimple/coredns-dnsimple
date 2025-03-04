@@ -71,7 +71,9 @@ docker-build:
 	go mod tidy; \
 	cp ../Dockerfile.release Dockerfile; \
 	cp ../bin/_docker/docker-entrypoint.sh docker-entrypoint.sh; \
-	rm .dockerignore; \
+	if [ -f ".dockerignore" ]; then \
+		rm .dockerignore; \
+	fi; \
 	docker build --no-cache --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
 
 .PHONY: clean
