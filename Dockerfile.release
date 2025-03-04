@@ -46,7 +46,7 @@ COPY . .
 
 ENV CGO_ENABLED=0
 RUN go build \
-  -ldflags "-X main.Version=$(PACKAGER_VERSION)" \
+  -ldflags "-X main.Version=${PACKAGER_VERSION}" \
   -ldflags "-X github.com/coredns/coredns/coremain.GitCommit=${GITCOMMIT}" \
   -o build/coredns
 
