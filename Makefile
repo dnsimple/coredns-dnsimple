@@ -79,6 +79,7 @@ docker-build:
 .PHONY: clean
 clean:
 	rm -rf coredns
+	rm -rf coredns.docker
 	rm -f bin/coredns-dnsimple
 
 .PHONY: start
