@@ -5,9 +5,6 @@ on:
     tags:
       - v*.*.*
 
-env:
-  GOLANG_VERSION: '1.23.4'
-
 jobs:
   publish:
     name: Release CoreDNS with DNSimple Plugin
@@ -31,7 +28,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "${{ env.GOLANG_VERSION }}"
+          go-version: '${{ steps.versions.outputs.golang }}'
           cache: true
 
       - name: Build CoreDNS with DNSimple Plugin
@@ -42,7 +39,7 @@ jobs:
           mkdir -p plugin/dnsimple
           cp ../*.go plugin/dnsimple
           cp ../go.mod plugin/dnsimple
-          sed -i "/^go ${{ env.GOLANG_VERSION }}/a replace github.com/dnsimple/coredns-dnsimple => $pluginDir" go.mod
+          sed -i "/^go ${{ steps.versions.outputs.golang }}/a replace github.com/dnsimple/coredns-dnsimple => $pluginDir" go.mod
           sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
           GOFLAGS=-mod=mod go generate
           go mod tidy

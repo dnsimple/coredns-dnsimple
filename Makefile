@@ -44,7 +44,6 @@ build:
 	fi
 	@export PLUGIN_DIR=$(shell pwd); \
 	cd coredns; \
-	cat go.mod; \
 	if ! grep -q "replace github.com/dnsimple/coredns-dnsimple" go.mod; then \
 		$(SED) -i "/^go 1/a replace github.com/dnsimple/coredns-dnsimple => $$PLUGIN_DIR" go.mod; \
 		$(SED) -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg; \

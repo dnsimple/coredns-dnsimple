@@ -11,9 +11,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GOLANG_VERSION: '1.23.4'
-
 jobs:
   lint:
     name: Lint
@@ -30,7 +27,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GOLANG_VERSION }}
+          go-version: '${{ steps.versions.outputs.golang }}'
           cache: true
 
       - run: go mod tidy
@@ -55,7 +52,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GOLANG_VERSION }}
+          go-version: '${{ steps.versions.outputs.golang }}'
           cache: true
 
       - run: go mod tidy

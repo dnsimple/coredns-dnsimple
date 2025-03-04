@@ -9,4 +9,4 @@ services:
     environment:
       - DNSIMPLE_TOKEN=${DNSIMPLE_TOKEN}
       - DNSIMPLE_ACCOUNT=${DNSIMPLE_ACCOUNT}
-    restart: unless-stopped 
+    restart: unless-stopped
