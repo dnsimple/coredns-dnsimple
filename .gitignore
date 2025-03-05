@@ -1,4 +1,5 @@
 /go.sum
 coredns/
+coredns.docker/
 Corefile
 coredns-dnsimple
