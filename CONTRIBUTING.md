@@ -58,15 +58,32 @@ make test
 make start
 ```
 
+## Building container locally (make build is a prerequisite)
+
+```shell
+make docker-build
+```
+
+## Building container with specific tag
+
+```shell
+PACKAGER_VERSION=dev make docker-build
+```
+
+## Run with docker compose
+
+```shell
+COREDNS_DNSIMPLE_TAG=dev docker compose up
+```
 
 ## Releasing
 
-The following instructions uses `$VERSION` as a placeholder, where `$VERSION` is a `MAJOR.MINOR.BUGFIX` release such as `1.2.0`.
+The following instructions uses `$PACKAGER_VERSION` as a placeholder, where `$PACKAGER_VERSION` is a `MAJOR.MINOR.BUGFIX` release such as `1.2.0`.
 
 1. Set the version in `./version.go`:
 
     ```go
-    PluginVersion = "$VERSION"
+    PluginVersion = "$PACKAGER_VERSION"
     ```
 
 1. Run the test suite and ensure all the tests pass.
@@ -76,7 +93,7 @@ The following instructions uses `$VERSION` as a placeholder, where `$VERSION` is
 1. Commit and push the changes
 
     ```shell
-    git commit -a -m "Release $VERSION"
+    git commit -a -m "Release $PACKAGER_VERSION"
     git push origin main
     ```
 
@@ -85,5 +102,5 @@ The following instructions uses `$VERSION` as a placeholder, where `$VERSION` is
 1. Release the version.
 
     ```shell
-    make release VERSION=$VERSION
+    make release VERSION=$PACKAGER_VERSION
     ```

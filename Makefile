@@ -5,12 +5,17 @@ else
 	SED=sed -i
 endif
 
-
 PLUGIN_VERSION:=$(shell grep 'PluginVersion' ./version.go | awk '{ print $$3 }' | tr -d '"')
+
+ifdef PACKAGER_VERSION
+PKG_VERSION := $(PACKAGER_VERSION)
+else
+PKG_VERSION := $(PLUGIN_VERSION)
+endif
 
 .PHONY: version
 version:
-	@echo $(PLUGIN_VERSION)
+	@echo $(PKG_VERSION)
 
 .PHONY: lint
 lint: install-tools
@@ -43,20 +48,43 @@ build:
 		$(SED) -i "/^go 1/a replace github.com/dnsimple/coredns-dnsimple => $$PLUGIN_DIR" go.mod; \
 		$(SED) -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg; \
 	fi; \
-	GOFLAGS=-mod=mod go generate; \
-	go mod tidy; \
 	gitcommit=$(shell git describe --dirty --always); \
 	go build -o coredns -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$$gitcommit" .
-	@cp coredns/coredns coredns-dnsimple
+	@mkdir -p bin
+	@cp coredns/coredns bin/coredns-dnsimple
+
+.PHONY: docker-build
+docker-build:
+	@echo "Building Docker image"
+	@if [ ! -d "coredns.docker" ]; then \
+		git clone https://github.com/coredns/coredns.git coredns.docker; \
+	fi
+	cd coredns.docker; \
+	if ! grep -q "replace github.com/dnsimple/coredns-dnsimple" go.mod; then \
+		$(SED) -i "/^go /a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod; \
+		$(SED) -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg; \
+	fi; \
+	mkdir -p plugin/dnsimple; \
+	cp ../*.go plugin/dnsimple; \
+	cp ../go.mod plugin/dnsimple; \
+	GOFLAGS=-mod=mod go generate; \
+	go mod tidy; \
+	cp ../Dockerfile.release Dockerfile; \
+	cp ../bin/_docker/docker-entrypoint.sh docker-entrypoint.sh; \
+	if [ -f ".dockerignore" ]; then \
+		rm .dockerignore; \
+	fi; \
+	docker build --no-cache --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
 
 .PHONY: clean
 clean:
 	rm -rf coredns
-	rm -f coredns-dnsimple
+	rm -rf coredns.docker
+	rm -f bin/coredns-dnsimple
 
 .PHONY: start
 start: build
-	./coredns-dnsimple -conf Corefile
+	./bin/coredns-dnsimple -conf Corefile
 
 .PHONY: release
 release: lint fmt test

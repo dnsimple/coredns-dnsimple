@@ -55,6 +55,7 @@ jobs:
           GOFLAGS=-mod=mod go generate
           go mod tidy
           cp ../Dockerfile.release .
+          cp ../bin/_docker/docker-entrypoint.sh .
           rm .dockerignore
 
       - name: Build and push
