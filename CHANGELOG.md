@@ -2,6 +2,11 @@
 
 ## main
 
+## 1.4.0
+
+- go version bump to 1.23.4
+- dependency updates + streamlining docker image release process 
+
 ## 1.3.0
 
 - This release bumps the go version to 1.23.
