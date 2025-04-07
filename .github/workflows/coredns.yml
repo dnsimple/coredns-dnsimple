@@ -1,3 +1,4 @@
+---
 name: CoreDNS
 
 on:
@@ -12,13 +13,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Read .tool-versions
-      uses: marocchino/tool-versions-action@v1
-      id: versions
-
     - uses: actions/setup-go@v5
       with:
-        go-version: '${{ steps.versions.outputs.golang }}'
+        go-version-file: 'go.mod'
         cache: true
 
     - name: Build CoreDNS

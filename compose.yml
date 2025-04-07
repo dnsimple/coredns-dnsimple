@@ -1,3 +1,4 @@
+---
 services:
   coredns:
     image: dnsimple/coredns:${COREDNS_DNSIMPLE_TAG:-latest}

@@ -1,7 +1,6 @@
 module github.com/dnsimple/coredns-dnsimple
 
-go 1.23.4
-toolchain go1.24.1
+go 1.24.1
 
 require (
 	github.com/coredns/caddy v1.1.2-0.20241029205200-8de985351a98
