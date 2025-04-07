@@ -3,7 +3,6 @@ package dnsimple
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -58,8 +57,6 @@ var newDnsimpleService = func(ctx context.Context, options Options, accessToken 
 }
 
 func setup(c *caddy.Controller) error {
-	rand.Seed(time.Now().UTC().UnixNano())
-
 	for c.Next() {
 		keyPairs := map[string]struct{}{}
 		keys := map[string][]string{}
