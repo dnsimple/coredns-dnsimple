@@ -20,13 +20,13 @@ type fakeDNSimpleClient struct {
 	mock.Mock
 }
 
-func (m *fakeDNSimpleClient) getZone(ctx context.Context, accountID string, zoneName string) (*dnsimple.Zone, error) {
+func (m *fakeDNSimpleClient) getZone(_ context.Context, _ string, _ string) (*dnsimple.Zone, error) {
 	return &dnsimple.Zone{
 		Name: "example.org",
 	}, nil
 }
 
-func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID string, zoneName string, maxRetries int) ([]dnsimple.ZoneRecord, error) {
+func (m *fakeDNSimpleClient) listZoneRecords(_ context.Context, _ string, zoneName string, _ int) ([]dnsimple.ZoneRecord, error) {
 	if zoneName == "example.bad" {
 		return nil, errors.New("example.bad. zone is bad")
 	}
@@ -212,7 +212,7 @@ func (m *fakeDNSimpleClient) listZoneRecords(ctx context.Context, accountID stri
 	return fakeZoneRecords, nil
 }
 
-func (m *fakeDNSimpleClient) updateZoneStatus(accountID string, apiCaller DNSimpleApiCaller, maxRetries int, status updateZoneStatusRequest) (err error) {
+func (m *fakeDNSimpleClient) updateZoneStatus(_ string, _ APICaller, _ int, _ updateZoneStatusRequest) (err error) {
 	return nil
 }
 
@@ -220,7 +220,7 @@ func TestDNSimple(t *testing.T) {
 	ctx := context.Background()
 	fakeClient := new(fakeDNSimpleClient)
 	opts := Options{
-		apiCaller: func(path string, body []byte) error { return nil },
+		apiCaller: func(_ string, _ []byte) error { return nil },
 	}
 
 	r, err := New(ctx, fakeClient, map[string][]string{"example.org.": {"AMS"}}, opts)
@@ -231,7 +231,7 @@ func TestDNSimple(t *testing.T) {
 	}
 	r.Fall = fall.Zero
 	r.Fall.SetZonesFromArgs([]string{""})
-	r.Next = test.HandlerFunc(func(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+	r.Next = test.HandlerFunc(func(_ context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 		state := request.Request{W: w, Req: r}
 		qname := state.Name()
 		m := new(dns.Msg)

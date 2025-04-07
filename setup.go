@@ -27,9 +27,9 @@ func init() { plugin.Register("dnsimple", setup) }
 const defaultUserAgent = "coredns-plugin-dnsimple"
 
 type Options struct {
-	accountId         string
+	accountID         string
 	accessToken       string
-	apiCaller         DNSimpleApiCaller
+	apiCaller         APICaller
 	customDNSResolver string
 	clientDNSResolver string
 	identifier        string
@@ -66,7 +66,7 @@ func setup(c *caddy.Controller) error {
 
 		opts := Options{}
 		var accessToken string
-		var baseUrl string
+		var baseURL string
 		var fall fall.F
 
 		args := c.RemainingArgs()
@@ -109,12 +109,12 @@ func setup(c *caddy.Controller) error {
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				opts.accountId = c.Val()
+				opts.accountID = c.Val()
 			case "base_url":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
 				}
-				baseUrl = c.Val()
+				baseURL = c.Val()
 			case "custom_dns_resolver":
 				if !c.NextArg() {
 					return plugin.Error("dnsimple", c.ArgErr())
@@ -174,17 +174,17 @@ func setup(c *caddy.Controller) error {
 			return plugin.Error("dnsimple", c.Err("access token must be provided via the Corefile or DNSIMPLE_TOKEN environment variable"))
 		}
 
-		if opts.accountId == "" {
-			opts.accountId = os.Getenv("DNSIMPLE_ACCOUNT_ID")
+		if opts.accountID == "" {
+			opts.accountID = os.Getenv("DNSIMPLE_ACCOUNT_ID")
 		}
 		// Still blank, return error
-		if opts.accountId == "" {
+		if opts.accountID == "" {
 			return plugin.Error("dnsimple", c.Err("account ID must be provided via the Corefile or DNSIMPLE_TOKEN environment variable"))
 		}
 
-		if baseUrl == "" {
+		if baseURL == "" {
 			// Default to production
-			baseUrl = "https://api.dnsimple.com"
+			baseURL = "https://api.dnsimple.com"
 		}
 
 		if opts.identifier == "" {
@@ -200,7 +200,7 @@ func setup(c *caddy.Controller) error {
 			dialer := &net.Dialer{
 				Resolver: &net.Resolver{
 					PreferGo: true,
-					Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+					Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 						d := net.Dialer{
 							Timeout: time.Second * 5,
 						}
@@ -213,10 +213,10 @@ func setup(c *caddy.Controller) error {
 			}
 		}
 
-		opts.apiCaller = createDNSimpleAPICaller(opts, baseUrl, accessToken, defaultUserAgent+"/"+PluginVersion)
+		opts.apiCaller = createDNSimpleAPICaller(opts, baseURL, accessToken, defaultUserAgent+"/"+PluginVersion)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		client, err := newDnsimpleService(ctx, opts, accessToken, baseUrl)
+		client, err := newDnsimpleService(ctx, opts, accessToken, baseURL)
 		if err != nil {
 			cancel()
 			return err
