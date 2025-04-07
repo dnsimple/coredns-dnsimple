@@ -1,13 +1,14 @@
 module github.com/dnsimple/coredns-dnsimple
 
 go 1.23.4
+
 toolchain go1.24.1
 
 require (
 	github.com/coredns/caddy v1.1.2-0.20241029205200-8de985351a98
 	github.com/coredns/coredns v1.12.1
 	github.com/dnsimple/dnsimple-go v1.7.0
-	github.com/miekg/dns v1.1.64
+	github.com/miekg/dns v1.1.65
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/oauth2 v0.28.0
 )
