@@ -13,28 +13,7 @@ else
 PKG_VERSION := $(PLUGIN_VERSION)
 endif
 
-.PHONY: version
-version:
-	@echo $(PKG_VERSION)
-
-.PHONY: lint
-lint: install-tools
-	golangci-lint run
-
-.PHONY: fmt
-fmt: install-tools
-	go fmt ./...
-	gofumpt -w ./
-
-.PHONY: install-tools
-install-tools:
-	@echo "Installing tools..."
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	@go install mvdan.cc/gofumpt@latest
-
-.PHONY: test
-test:
-	go test -v ./...
+all: build
 
 .PHONY: build
 build:
@@ -52,6 +31,28 @@ build:
 	go build -o coredns -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=$$gitcommit" .
 	@mkdir -p bin
 	@cp coredns/coredns bin/coredns-dnsimple
+
+.PHONY: clean
+clean:
+	rm -rf coredns
+	rm -rf coredns.docker
+	rm -f bin/coredns-dnsimple
+
+.PHONY: fmt
+fmt:
+	gofumpt -l -w .
+
+.PHONY: lint
+lint:
+	golangci-lint run
+
+.PHONY: test
+test:
+	go test -v ./...
+
+.PHONY: start
+start: build
+	./bin/coredns-dnsimple -conf Corefile
 
 .PHONY: docker-build
 docker-build:
@@ -76,15 +77,9 @@ docker-build:
 	fi; \
 	docker build --no-cache --build-arg PACKAGER_VERSION=$(PKG_VERSION) --no-cache -t dnsimple/coredns:$(PKG_VERSION) .
 
-.PHONY: clean
-clean:
-	rm -rf coredns
-	rm -rf coredns.docker
-	rm -f bin/coredns-dnsimple
-
-.PHONY: start
-start: build
-	./bin/coredns-dnsimple -conf Corefile
+.PHONY: version
+version:
+	@echo $(PKG_VERSION)
 
 .PHONY: release
 release: lint fmt test
