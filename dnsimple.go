@@ -275,7 +275,11 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		return dns.RcodeServerFailure, nil
 	}
 
-	w.WriteMsg(msg)
+	err := w.WriteMsg(msg)
+	if err != nil {
+		return dns.RcodeServerFailure, err
+	}
+
 	return dns.RcodeSuccess, nil
 }
 
@@ -447,8 +451,7 @@ func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
 	if len(*answers) != 1 {
 		return
 	}
-	switch cname := (*answers)[0].(type) {
-	case *dns.CNAME:
+	if cname, ok := (*answers)[0].(*dns.CNAME); ok {
 		if pool, ok := zone.pools[cname.Hdr.Name]; ok {
 			qname := cname.Hdr.Name
 			ttl := cname.Hdr.Ttl
@@ -523,7 +526,8 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 		}
 		rawRecords := make([]rawRecord, 0)
 
-		if rec.Type == "ALIAS" {
+		switch rec.Type {
+		case "ALIAS":
 			// See the comment for the `maybeInterceptAliasResponse` function for details on how this works.
 			isFirst := false
 			if _, ok := aliasNames[fqdn]; !ok {
@@ -546,13 +550,13 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 				content:      AliasDummyIPv6.String(),
 				isAliasDummy: true,
 			})
-		} else if rec.Type == "MX" {
+		case "MX":
 			// MX records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     "MX",
 				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
 			})
-		} else if rec.Type == "POOL" {
+		case "POOL":
 			isFirst := false
 			if pools[fqdn] == nil {
 				pools[fqdn] = make([]string, 0)
@@ -569,13 +573,13 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 				typ:     "CNAME",
 				content: rec.Content,
 			})
-		} else if rec.Type == "SRV" {
+		case "SRV":
 			// SRV records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     "SRV",
 				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
 			})
-		} else if rec.Type == "URL" {
+		case "URL":
 			for _, res := range urlSvcIps {
 				typ := "AAAA"
 				if res.To4() != nil {
@@ -586,7 +590,7 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 					content: res.String(),
 				})
 			}
-		} else {
+		default:
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     rec.Type,
 				content: rec.Content,

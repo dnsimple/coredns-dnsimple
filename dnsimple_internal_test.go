@@ -249,7 +249,11 @@ func TestDNSimple(t *testing.T) {
 		}
 
 		m.SetRcode(r, rcode)
-		w.WriteMsg(m)
+		err := w.WriteMsg(m)
+		if err != nil {
+			t.Fatalf("failed to write message: %v", err)
+		}
+
 		return rcode, nil
 	})
 	err = r.Run(ctx)
