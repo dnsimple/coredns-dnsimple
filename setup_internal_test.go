@@ -13,7 +13,7 @@ func TestSetupDNSimple(t *testing.T) {
 	t.Setenv("DNSIMPLE_ACCOUNT_ID", "12345")
 
 	fakeClient := new(fakeDNSimpleClient)
-	newDnsimpleService = func(ctx context.Context, options Options, accessToken, baseUrl string) (dnsimpleService, error) {
+	newDnsimpleService = func(_ context.Context, _ Options, _, _ string) (dnsimpleService, error) {
 		return fakeClient, nil
 	}
 

@@ -81,9 +81,9 @@ func (g *nameGraph) insertName(name string, value string) {
 	g.m[k] = append(g.m[k], withoutDot(value))
 }
 
-type DNSimpleApiCaller func(path string, body []byte) error
+type APICaller func(path string, body []byte) error
 
-func createDNSimpleAPICaller(options Options, baseURL string, accessToken string, userAgent string) DNSimpleApiCaller {
+func createDNSimpleAPICaller(options Options, baseURL string, accessToken string, userAgent string) APICaller {
 	return func(path string, body []byte) error {
 		url := fmt.Sprintf("%s%s", baseURL, path)
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
@@ -126,7 +126,7 @@ type DNSimple struct {
 	Fall fall.F
 	Next plugin.Handler
 
-	accountId   string
+	accountID   string
 	client      dnsimpleService
 	identifier  string
 	lock        sync.RWMutex
@@ -136,7 +136,7 @@ type DNSimple struct {
 	zoneNames   []string // set using the zone object fqdn
 	zones       zones
 	dnsResolver *net.Resolver
-	apiCaller   DNSimpleApiCaller
+	apiCaller   APICaller
 }
 
 type zone struct {
@@ -160,7 +160,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 
 		// Check if the zone exists.
 		// Our API does not expect the zone name to end with a dot.
-		res, err := client.getZone(ctx, opts.accountId, withoutDot(fqdn))
+		res, err := client.getZone(ctx, opts.accountID, withoutDot(fqdn))
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +175,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 	if opts.customDNSResolver != "" {
 		dnsResolver = &net.Resolver{
 			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				d := net.Dialer{
 					Timeout: time.Second * 10,
 				}
@@ -184,7 +184,7 @@ func New(ctx context.Context, client dnsimpleService, keys map[string][]string, 
 		}
 	}
 	return &DNSimple{
-		accountId:   opts.accountId,
+		accountID:   opts.accountID,
 		apiCaller:   opts.apiCaller,
 		client:      client,
 		dnsResolver: dnsResolver,
@@ -275,7 +275,11 @@ func (h *DNSimple) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Ms
 		return dns.RcodeServerFailure, nil
 	}
 
-	w.WriteMsg(msg)
+	err := w.WriteMsg(msg)
+	if err != nil {
+		return dns.RcodeServerFailure, err
+	}
+
 	return dns.RcodeSuccess, nil
 }
 
@@ -447,8 +451,7 @@ func maybeInterceptPoolResponse(zone *zone, answers *[]dns.RR) {
 	if len(*answers) != 1 {
 		return
 	}
-	switch cname := (*answers)[0].(type) {
-	case *dns.CNAME:
+	if cname, ok := (*answers)[0].(*dns.CNAME); ok {
 		if pool, ok := zone.pools[cname.Hdr.Name]; ok {
 			qname := cname.Hdr.Name
 			ttl := cname.Hdr.Ttl
@@ -523,7 +526,8 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 		}
 		rawRecords := make([]rawRecord, 0)
 
-		if rec.Type == "ALIAS" {
+		switch rec.Type {
+		case "ALIAS":
 			// See the comment for the `maybeInterceptAliasResponse` function for details on how this works.
 			isFirst := false
 			if _, ok := aliasNames[fqdn]; !ok {
@@ -546,13 +550,13 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 				content:      AliasDummyIPv6.String(),
 				isAliasDummy: true,
 			})
-		} else if rec.Type == "MX" {
+		case "MX":
 			// MX records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     "MX",
 				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
 			})
-		} else if rec.Type == "POOL" {
+		case "POOL":
 			isFirst := false
 			if pools[fqdn] == nil {
 				pools[fqdn] = make([]string, 0)
@@ -569,13 +573,13 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 				typ:     "CNAME",
 				content: rec.Content,
 			})
-		} else if rec.Type == "SRV" {
+		case "SRV":
 			// SRV records have a priority and a content field.
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     "SRV",
 				content: fmt.Sprintf("%d %s", rec.Priority, rec.Content),
 			})
-		} else if rec.Type == "URL" {
+		case "URL":
 			for _, res := range urlSvcIps {
 				typ := "AAAA"
 				if res.To4() != nil {
@@ -586,7 +590,7 @@ func updateZoneFromRecords(zoneNames []string, zoneName string, records []dnsimp
 					content: res.String(),
 				})
 			}
-		} else {
+		default:
 			rawRecords = append(rawRecords, rawRecord{
 				typ:     rec.Type,
 				content: rec.Content,
@@ -678,9 +682,9 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 		go func(zoneName string, z []*zone) {
 			defer wg.Done()
 
-			zoneRecords, listZoneError := h.client.listZoneRecords(ctx, h.accountId, zoneName, h.maxRetries)
+			zoneRecords, listZoneError := h.client.listZoneRecords(ctx, h.accountID, zoneName, h.maxRetries)
 
-			errorByRecordId := make(map[int64]updateZoneRecordFailure)
+			errorByRecordID := make(map[int64]updateZoneRecordFailure)
 			if listZoneError == nil {
 				for _, regionalZone := range z {
 					newZone := file.NewZone(zoneName, "")
@@ -691,7 +695,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					// Deduplicate errors by record ID, as otherwise we'll duplicate errors for all records that aren't regional. Note that some regional records may have errors, so we cannot just take the first region's errors only.
 					failedRecords := updateZoneFromRecords(h.zoneNames, zoneName, zoneRecords, regionalZone.region, newAliases, newPools, urlSvcIps, newZone)
 					for _, f := range failedRecords {
-						errorByRecordId[f.Record.ID] = f
+						errorByRecordID[f.Record.ID] = f
 					}
 
 					h.lock.Lock()
@@ -702,7 +706,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 				}
 			}
 			failedRecords := make([]updateZoneRecordFailure, 0, 100)
-			for _, f := range errorByRecordId {
+			for _, f := range errorByRecordID {
 				failedRecords = append(failedRecords, f)
 				if len(failedRecords) >= 100 {
 					break
@@ -731,7 +735,7 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 					FailedRecords:     failedRecords,
 				},
 			}
-			err := h.client.updateZoneStatus(h.accountId, h.apiCaller, h.maxRetries, status)
+			err := h.client.updateZoneStatus(h.accountID, h.apiCaller, h.maxRetries, status)
 			if err != nil {
 				log.Errorf("failed to update zone status: %v", err)
 			}
@@ -742,4 +746,4 @@ func (h *DNSimple) updateZones(ctx context.Context) error {
 }
 
 // Name implements the plugin.Handle interface.
-func (re *DNSimple) Name() string { return "dnsimple" }
+func (h *DNSimple) Name() string { return "dnsimple" }
