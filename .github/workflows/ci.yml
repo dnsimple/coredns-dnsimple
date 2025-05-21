@@ -29,8 +29,8 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
-    needs:
-      - golangci-lint
+    # needs:
+    #   - golangci-lint
 
     steps:
       - uses: actions/checkout@v4
