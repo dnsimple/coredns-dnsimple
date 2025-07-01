@@ -2,10 +2,16 @@
 
 ## main
 
+## 1.5.0
+
+- go version bump to 1.24.4
+- bump CoreDNS 1.12.2
+- other dependency updates
+
 ## 1.4.0
 
 - go version bump to 1.23.4
-- dependency updates + streamlining docker image release process 
+- dependency updates + streamlining docker image release process
 
 ## 1.3.0
 
