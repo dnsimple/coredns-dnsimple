@@ -6,7 +6,7 @@ require (
 	github.com/coredns/caddy v1.1.2-0.20241029205200-8de985351a98
 	github.com/coredns/coredns v1.12.1
 	github.com/dnsimple/dnsimple-go v1.7.0
-	github.com/miekg/dns v1.1.65
+	github.com/miekg/dns v1.1.66
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/oauth2 v0.29.0
 )
