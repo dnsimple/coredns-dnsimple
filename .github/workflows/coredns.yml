@@ -3,30 +3,30 @@ name: CoreDNS
 
 on:
   push:
-    branches: [ 'main' ]
+    branches: ['main']
   pull_request:
-    branches: [ 'main' ]
+    branches: ['main']
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        cache: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
 
-    - name: Build CoreDNS
-      run: |
-        git clone https://github.com/coredns/coredns
-        pushd coredns
-        mkdir -p plugin/dnsimple
-        cp ../*.go plugin/dnsimple
-        cp ../go.mod plugin/dnsimple
-        sed -i "/^go ${{ steps.versions.outputs.golang }}/a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod
-        sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
-        GOFLAGS=-mod=mod go generate
-        go mod tidy
-        go build
+      - name: Build CoreDNS
+        run: |
+          git clone https://github.com/coredns/coredns
+          pushd coredns
+          mkdir -p plugin/dnsimple
+          cp ../*.go plugin/dnsimple
+          cp ../go.mod plugin/dnsimple
+          sed -i "/^go ${{ steps.versions.outputs.golang }}/a replace github.com/dnsimple/coredns-dnsimple => ./plugin/dnsimple" go.mod
+          sed -i '/route53:route53/i dnsimple:github.com\/dnsimple\/coredns-dnsimple' plugin.cfg
+          GOFLAGS=-mod=mod go generate
+          go mod tidy
+          go build
