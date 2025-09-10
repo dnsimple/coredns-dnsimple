@@ -2,6 +2,10 @@
 
 ## main
 
+- go version bump to 1.24.7
+- bump CoreDNS 1.12.4
+- other dependency updates
+
 ## 1.5.0
 
 - go version bump to 1.24.4
