@@ -1,6 +1,9 @@
 module github.com/dnsimple/coredns-dnsimple
 
-go 1.24.7
+// Note this is the minimum version requirement. We supports the last two
+// Go versions. This follows the upstream Go project support. And CoreDNS
+// itself supports the last two Go versions as well.
+go 1.24.0
 
 require (
 	github.com/coredns/caddy v1.1.4-0.20250930002214-15135a999495
