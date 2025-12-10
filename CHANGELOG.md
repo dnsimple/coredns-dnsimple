@@ -3,6 +3,7 @@
 ## main
 
 - go version bump to 1.24.11
+- bump CoreDNS 1.13.1
 - other dependency updates
 
 ## 1.6.0
