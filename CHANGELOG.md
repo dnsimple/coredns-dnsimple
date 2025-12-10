@@ -2,6 +2,8 @@
 
 ## main
 
+- go version bump to 1.25.2
+
 ## 1.7.0
 
 - go version bump to 1.24.11
