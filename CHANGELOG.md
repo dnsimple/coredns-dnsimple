@@ -2,6 +2,9 @@
 
 ## main
 
+- go version bump to 1.24.11
+- other dependency updates
+
 ## 1.6.0
 
 - go version bump to 1.24.7
