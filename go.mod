@@ -1,5 +1,8 @@
 module github.com/dnsimple/coredns-dnsimple
 
+// Note this is the minimum version requirement. We supports the last two
+// Go versions. This follows the upstream Go project support. And CoreDNS
+// itself supports the last two Go versions as well.
 go 1.25.2
 
 require (
