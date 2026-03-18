@@ -467,7 +467,7 @@ func TestDNSimple(t *testing.T) {
 				}
 			}
 		} else {
-			msgAnswers := make([]string, 0)
+			msgAnswers := make([]string, 0, len(rec.Msg.Answer))
 			assert.NotNilf(t, rec.Msg, "Test %d: Unexpected Msg was nil.", ti)
 
 			for _, a := range rec.Msg.Answer {
