@@ -2,7 +2,12 @@
 
 ## main
 
+## 1.8.0
+
 - go version bump to 1.25.2
+- bump CoreDNS 1.14.2
+- migrate Docker release workflow from Buildx/QEMU to Depot
+- other dependency updates
 
 ## 1.7.0
 

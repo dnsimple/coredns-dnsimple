@@ -1,5 +1,5 @@
 package dnsimple
 
 const (
-	PluginVersion = "1.7.0"
+	PluginVersion = "1.8.0"
 )
