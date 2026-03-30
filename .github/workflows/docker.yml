@@ -27,7 +27,7 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Wait for tests to succeed
-        uses: lewagon/wait-on-check-action@v1.5.0
+        uses: lewagon/wait-on-check-action@v1.6.0
         with:
           ref: 'refs/heads/main'
           check-name: 'Run tests'
